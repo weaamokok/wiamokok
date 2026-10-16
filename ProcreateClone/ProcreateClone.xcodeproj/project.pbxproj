@@ -14,12 +14,14 @@
 		43F6DE913249F73DF4012C64 /* MetalCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */; };
 		4535C50210FBF0134F6DA881 /* ToolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE99A5A4618F9E3D6F947CD8 /* ToolPickerView.swift */; };
 		52AAD81036C1FB06AC760CC0 /* DrawingTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3937F57D155337674044C48 /* DrawingTool.swift */; };
+		6872E3C09E3893B37B705062 /* DrawingDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8336812EA8DE9C01D0DFD51A /* DrawingDocument.swift */; };
 		69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 356455AACA98408A2F03E648 /* CanvasToolbarView.swift */; };
 		7A88A3AB95F80D83A54602A5 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 0AC75208284F61A8533B6C25 /* Shaders.metal */; };
 		987F4C9904A21F74F182644D /* TouchInputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */; };
 		A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089F89526060D113CF2CFA4 /* BrushStamp.swift */; };
 		B9ED09964817583BFB309F34 /* LayerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4718B3A4E55B85142C5EB489 /* LayerPanelView.swift */; };
 		C083BF4AB73DE03A75B35776 /* CanvasContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */; };
+		D047F81C6CCB051C66D31F3D /* DocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */; };
 		DB3BA1DD7ACCF740E619F750 /* HistoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB9942C1E1F6C0E1ACDDF41 /* HistoryManager.swift */; };
 		E630A494FCD948549AF08054 /* LayerStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A63D1EDFEABABF733B146BD /* LayerStack.swift */; };
 		F7A09D635D58A0F8649F535A /* ProcreateCloneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */; };
@@ -34,6 +36,7 @@
 		4DB9942C1E1F6C0E1ACDDF41 /* HistoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManager.swift; sourceTree = "<group>"; };
 		510039879CD6EF54C3E4A4E0 /* BrushEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushEngine.swift; sourceTree = "<group>"; };
 		7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcreateCloneApp.swift; sourceTree = "<group>"; };
+		8336812EA8DE9C01D0DFD51A /* DrawingDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingDocument.swift; sourceTree = "<group>"; };
 		902C566AEAC0EF5B12E81ABF /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
 		B6ABC98B088972DE4892616D /* CanvasLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasLayer.swift; sourceTree = "<group>"; };
 		C089F89526060D113CF2CFA4 /* BrushStamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushStamp.swift; sourceTree = "<group>"; };
@@ -43,6 +46,7 @@
 		DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCanvasView.swift; sourceTree = "<group>"; };
 		DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchInputHandler.swift; sourceTree = "<group>"; };
 		DEAC480DE221513C72B05795 /* ProcreateClone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ProcreateClone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentStore.swift; sourceTree = "<group>"; };
 		F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorWheelView.swift; sourceTree = "<group>"; };
 		FA9974D41F7947B361F01EDD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FE99A5A4618F9E3D6F947CD8 /* ToolPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPickerView.swift; sourceTree = "<group>"; };
@@ -155,6 +159,8 @@
 		D0EF8F97FDA4A8F459244428 /* Gallery */ = {
 			isa = PBXGroup;
 			children = (
+				ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */,
+				8336812EA8DE9C01D0DFD51A /* DrawingDocument.swift */,
 				902C566AEAC0EF5B12E81ABF /* GalleryView.swift */,
 			);
 			path = Gallery;
@@ -243,6 +249,8 @@
 				69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */,
 				28B6B001736E1D2609616A91 /* CanvasViewController.swift in Sources */,
 				F9765F523820E5D6E436853E /* ColorWheelView.swift in Sources */,
+				D047F81C6CCB051C66D31F3D /* DocumentStore.swift in Sources */,
+				6872E3C09E3893B37B705062 /* DrawingDocument.swift in Sources */,
 				52AAD81036C1FB06AC760CC0 /* DrawingTool.swift in Sources */,
 				156FCD805DD574FCE9853490 /* GalleryView.swift in Sources */,
 				DB3BA1DD7ACCF740E619F750 /* HistoryManager.swift in Sources */,
@@ -323,7 +331,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -391,7 +399,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;

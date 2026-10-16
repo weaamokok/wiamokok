@@ -13,6 +13,7 @@ struct CanvasToolbarView: View {
     var onUndo: () -> Void
     var onRedo: () -> Void
     var onClear: () -> Void
+    var onExport: () -> Void
 
     @State private var showColorPicker = false
     @State private var showLayers = false
@@ -67,6 +68,9 @@ struct CanvasToolbarView: View {
 
                 // Clear
                 toolbarButton(icon: "trash", enabled: true) { onClear() }
+
+                // Export / share
+                toolbarButton(icon: "square.and.arrow.up", enabled: true) { onExport() }
 
                 // Close
                 toolbarButton(icon: "xmark.circle.fill", enabled: true) { onClose() }

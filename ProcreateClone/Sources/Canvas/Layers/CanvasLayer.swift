@@ -14,6 +14,12 @@ final class CanvasLayer {
         self.texture = texture
     }
 
+    /// Full-resolution PNG of this layer's texture (for disk persistence).
+    func pngData() -> Data? {
+        thumbnail(size: CGSize(width: texture.width, height: texture.height))
+            .flatMap { $0.pngData() }
+    }
+
     /// Render this layer's texture into a UIImage for panel thumbnails.
     /// Runs synchronously — call off the main thread or keep textures small.
     func thumbnail(size: CGSize) -> UIImage? {

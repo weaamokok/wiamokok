@@ -30,6 +30,12 @@ final class MetalCanvasView: MTKView {
     private var brushEngine: BrushEngine!
     private var inputHandler: TouchInputHandler!
 
+    /// Fired once after the canvas first gets a valid size (width, height in pixels).
+    var onCanvasSized: ((Int, Int) -> Void)?
+    private var hasFiredSized = false
+    /// Fired after each stroke is committed to a layer texture.
+    var onStrokeCommitted: (() -> Void)?
+
     // MARK: - Init
 
     override init(frame: CGRect, device: MTLDevice?) {
@@ -134,6 +140,10 @@ final class MetalCanvasView: MTKView {
         compositeTexture = makePrivateTexture(width: w, height: h)
         Task { @MainActor in
             layerStack.setCanvasSize(width: w, height: h)
+            if !self.hasFiredSized {
+                self.hasFiredSized = true
+                self.onCanvasSized?(w, h)
+            }
         }
     }
 
@@ -282,6 +292,7 @@ final class MetalCanvasView: MTKView {
 
         brushEngine.clearCurrentStroke()
         smudgePickupTexture = nil
+        onStrokeCommitted?()
     }
 
     private func copyTexture(_ src: MTLTexture) -> MTLTexture? {
@@ -306,6 +317,40 @@ final class MetalCanvasView: MTKView {
     func setBrushSize(_ size: Float)        { brushEngine.brushSize    = size    }
     func setBrushOpacity(_ opacity: Float)  { brushEngine.brushOpacity = opacity }
     func setActiveTool(_ tool: DrawingTool) { brushEngine.activeTool   = tool    }
+
+    /// Renders a flat composite of all visible layers and returns it as a UIImage.
+    func renderCompositeImage() -> UIImage? {
+        guard let composite = compositeTexture else { return nil }
+
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: composite.width, height: composite.height, mipmapped: false)
+        desc.storageMode = .shared
+        desc.usage = [.shaderRead]
+        guard let shared = device!.makeTexture(descriptor: desc),
+              let cmd  = commandQueue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder()
+        else { return nil }
+        blit.copy(from: composite, to: shared)
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        let w = composite.width, h = composite.height
+        let bpr = w * 4
+        var bytes = [UInt8](repeating: 0, count: h * bpr)
+        shared.getBytes(&bytes, bytesPerRow: bpr,
+                        from: MTLRegion(origin: .init(x: 0, y: 0, z: 0),
+                                        size: .init(width: w, height: h, depth: 1)),
+                        mipmapLevel: 0)
+        guard let ctx = CGContext(
+            data: &bytes, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: bpr,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ), let cgImg = ctx.makeImage() else { return nil }
+        return UIImage(cgImage: cgImg, scale: contentScaleFactor, orientation: .up)
+    }
 
     func undo() {
         brushEngine.clearCurrentStroke()

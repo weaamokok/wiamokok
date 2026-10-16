@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct ProcreateCloneApp: App {
@@ -6,5 +7,6 @@ struct ProcreateCloneApp: App {
         WindowGroup {
             GalleryView()
         }
+        .modelContainer(for: DrawingDocument.self)
     }
 }

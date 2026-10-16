@@ -71,6 +71,13 @@ final class LayerStack: ObservableObject {
         activeIndex = index
     }
 
+    /// Replace all layers with the given textures (used when loading a saved document).
+    func replaceAll(textures: [MTLTexture], names: [String]) {
+        guard !textures.isEmpty else { return }
+        layers = zip(textures, names).map { tex, name in CanvasLayer(name: name, texture: tex) }
+        activeIndex = 0
+    }
+
     func move(from source: IndexSet, to destination: Int) {
         layers.move(fromOffsets: source, toOffset: destination)
         // Re-locate active layer after move

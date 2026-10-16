@@ -4,6 +4,7 @@ import SwiftUI
 final class CanvasViewController: UIViewController {
 
     var onDismiss: (() -> Void)?
+    var document: DrawingDocument?
 
     private var metalCanvas: MetalCanvasView!
     private var toolbarHost: UIHostingController<CanvasToolbarView>!
@@ -13,12 +14,20 @@ final class CanvasViewController: UIViewController {
     private var brushOpacity: Float = 0.85  { didSet { applyBrushSettings() } }
     private var activeTool: DrawingTool = .brush { didSet { metalCanvas.setActiveTool(activeTool) } }
 
+    private var autosaveTimer: Timer?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .white
         setupCanvas()
         setupToolbar()
         setupGestures()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        autosaveTimer?.invalidate()
+        saveDocument()
     }
 
     // MARK: - Setup
@@ -34,6 +43,14 @@ final class CanvasViewController: UIViewController {
             metalCanvas.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         applyBrushSettings()
+
+        // Load saved layers once the canvas has a pixel size
+        metalCanvas.onCanvasSized = { [weak self] w, h in
+            self?.loadDocumentIfNeeded(canvasWidth: w, height: h)
+        }
+        metalCanvas.onStrokeCommitted = { [weak self] in
+            self?.scheduleAutosave()
+        }
     }
 
     private func setupToolbar() {
@@ -44,10 +61,11 @@ final class CanvasViewController: UIViewController {
             activeTool:   Binding(get: { self.activeTool },   set: { self.activeTool   = $0 }),
             layerStack:   metalCanvas.layerStack,
             history:      metalCanvas.history,
-            onClose: { [weak self] in self?.onDismiss?() },
-            onUndo:  { [weak self] in self?.metalCanvas.undo() },
-            onRedo:  { [weak self] in self?.metalCanvas.redo() },
-            onClear: { [weak self] in self?.metalCanvas.clearCanvas() }
+            onClose:  { [weak self] in self?.onDismiss?() },
+            onUndo:   { [weak self] in self?.metalCanvas.undo() },
+            onRedo:   { [weak self] in self?.metalCanvas.redo() },
+            onClear:  { [weak self] in self?.metalCanvas.clearCanvas() },
+            onExport: { [weak self] in self?.exportPNG() }
         )
 
         toolbarHost = UIHostingController(rootView: toolbar)
@@ -68,18 +86,63 @@ final class CanvasViewController: UIViewController {
     }
 
     private func setupGestures() {
-        // 2-finger tap → undo  (Procreate standard)
         let twoFinger = UITapGestureRecognizer(target: self, action: #selector(undoGesture))
         twoFinger.numberOfTouchesRequired = 2
         view.addGestureRecognizer(twoFinger)
 
-        // 3-finger tap → redo
         let threeFinger = UITapGestureRecognizer(target: self, action: #selector(redoGesture))
         threeFinger.numberOfTouchesRequired = 3
         view.addGestureRecognizer(threeFinger)
 
-        // Let drawing touches through even when multi-finger gestures are recognised
         twoFinger.require(toFail: threeFinger)
+    }
+
+    // MARK: - Document load
+
+    private func loadDocumentIfNeeded(canvasWidth w: Int, height h: Int) {
+        guard let doc = document,
+              let gpu = metalCanvas.device
+        else { return }
+        let store = DocumentStore.shared
+        guard let textures = store.loadTextures(for: doc, device: gpu, width: w, height: h)
+        else { return }
+
+        let names = (0..<textures.count).map { i in i == 0 ? "Background" : "Layer \(i)" }
+        Task { @MainActor in
+            self.metalCanvas.layerStack.replaceAll(textures: textures, names: names)
+        }
+    }
+
+    // MARK: - Autosave
+
+    func scheduleAutosave() {
+        autosaveTimer?.invalidate()
+        autosaveTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+            self?.saveDocument()
+        }
+    }
+
+    private func saveDocument() {
+        guard let doc = document else { return }
+        let layers    = metalCanvas.layerStack.layers
+        let thumbnail = metalCanvas.renderCompositeImage()
+        DocumentStore.shared.save(document: doc, layers: layers, thumbnail: thumbnail)
+    }
+
+    // MARK: - Export
+
+    private func exportPNG() {
+        guard let image = metalCanvas.renderCompositeImage(),
+              let data  = image.pngData()
+        else { return }
+
+        let tmp = FileManager.default.temporaryDirectory
+            .appending(path: "\(document?.title ?? "drawing").png")
+        try? data.write(to: tmp)
+
+        let vc = UIActivityViewController(activityItems: [tmp], applicationActivities: nil)
+        vc.popoverPresentationController?.sourceView = view
+        present(vc, animated: true)
     }
 
     // MARK: - Brush sync
