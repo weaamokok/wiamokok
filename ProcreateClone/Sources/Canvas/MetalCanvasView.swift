@@ -15,9 +15,13 @@ final class MetalCanvasView: MTKView {
     private var commandQueue: MTLCommandQueue!
     private var blitPipeline:  MTLRenderPipelineState!   // canvas layer → composite
     private var stampPipeline: MTLRenderPipelineState!   // brush stamps → layer/composite
+    private var erasePipeline: MTLRenderPipelineState!   // erase stamps → layer/composite
+    private var smudgePipeline: MTLRenderPipelineState!  // smudge stamps → layer/composite
 
     /// Scratch texture that accumulates all layers before being shown.
     private var compositeTexture: MTLTexture?
+    /// Snapshot of the active layer taken at smudge stroke begin.
+    private var smudgePickupTexture: MTLTexture?
 
     // MARK: - App objects
 
@@ -57,6 +61,7 @@ final class MetalCanvasView: MTKView {
         brushEngine = BrushEngine(device: gpu)
 
         inputHandler = TouchInputHandler()
+        inputHandler.onStrokeBegin  = { [weak self] in self?.handleStrokeBegin() }
         inputHandler.onStrokeUpdate = { [weak self] pts in self?.brushEngine.addPoints(pts) }
         inputHandler.onStrokeEnd    = { [weak self] in self?.commitCurrentStroke() }
     }
@@ -91,6 +96,30 @@ final class MetalCanvasView: MTKView {
         stampDesc.colorAttachments[0].sourceAlphaBlendFactor      = .one
         stampDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         stampPipeline = try! gpu.makeRenderPipelineState(descriptor: stampDesc)
+
+        // Erase pipeline — cuts alpha from destination
+        let eraseDesc = MTLRenderPipelineDescriptor()
+        eraseDesc.vertexFunction   = lib.makeFunction(name: "stampVertexShader")
+        eraseDesc.fragmentFunction = lib.makeFunction(name: "eraseFragmentShader")
+        eraseDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        eraseDesc.colorAttachments[0].isBlendingEnabled = true
+        eraseDesc.colorAttachments[0].sourceRGBBlendFactor        = .zero
+        eraseDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        eraseDesc.colorAttachments[0].sourceAlphaBlendFactor      = .zero
+        eraseDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        erasePipeline = try! gpu.makeRenderPipelineState(descriptor: eraseDesc)
+
+        // Smudge pipeline — pre-multiplied alpha (same blend, different fragment)
+        let smudgeDesc = MTLRenderPipelineDescriptor()
+        smudgeDesc.vertexFunction   = lib.makeFunction(name: "stampVertexShader")
+        smudgeDesc.fragmentFunction = lib.makeFunction(name: "smudgeFragmentShader")
+        smudgeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        smudgeDesc.colorAttachments[0].isBlendingEnabled = true
+        smudgeDesc.colorAttachments[0].sourceRGBBlendFactor        = .one
+        smudgeDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        smudgeDesc.colorAttachments[0].sourceAlphaBlendFactor      = .one
+        smudgeDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        smudgePipeline = try! gpu.makeRenderPipelineState(descriptor: smudgeDesc)
     }
 
     // MARK: - Layout / texture init
@@ -126,11 +155,12 @@ final class MetalCanvasView: MTKView {
             let cmdBuf    = commandQueue.makeCommandBuffer()
         else { return }
 
-        let layers  = layerStack.layers
-        let activeI = layerStack.activeIndex
-        let stamps  = brushEngine.currentStrokeStamps
-        let dSize   = CGSize(width: self.drawableSize.width, height: self.drawableSize.height)
-        let scale   = Float(contentScaleFactor)
+        let layers   = layerStack.layers
+        let activeI  = layerStack.activeIndex
+        let stamps   = brushEngine.currentStrokeStamps
+        let activeTool = brushEngine.activeTool
+        let dSize    = CGSize(width: self.drawableSize.width, height: self.drawableSize.height)
+        let scale    = Float(contentScaleFactor)
 
         // ── Pass 1: Composite all layers into compositeTexture ───────────────
         let compPass = MTLRenderPassDescriptor()
@@ -155,7 +185,16 @@ final class MetalCanvasView: MTKView {
 
                 // If active layer, draw in-progress stamps on top
                 if i == activeI, !stamps.isEmpty {
-                    enc.setRenderPipelineState(stampPipeline)
+                    let pipeline: MTLRenderPipelineState
+                    switch activeTool {
+                    case .eraser: pipeline = erasePipeline
+                    case .smudge: pipeline = smudgePipeline
+                    default:      pipeline = stampPipeline
+                    }
+                    enc.setRenderPipelineState(pipeline)
+                    if activeTool == .smudge, let pickup = smudgePickupTexture {
+                        enc.setFragmentTexture(pickup, index: 0)
+                    }
                     for stamp in stamps {
                         var u = stamp.uniforms(drawableSize: dSize, scale: scale)
                         enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
@@ -188,27 +227,47 @@ final class MetalCanvasView: MTKView {
         cmdBuf.commit()
     }
 
-    // MARK: - Stroke commit
+    // MARK: - Stroke begin / commit
+
+    private func handleStrokeBegin() {
+        // For smudge: snapshot the active layer so the shader can sample it
+        guard brushEngine.activeTool == .smudge,
+              let layer = layerStack.activeLayer else {
+            smudgePickupTexture = nil
+            return
+        }
+        smudgePickupTexture = copyTexture(layer.texture)
+    }
 
     private func commitCurrentStroke() {
         let stamps = brushEngine.currentStrokeStamps
         guard !stamps.isEmpty, let layer = layerStack.activeLayer else {
             brushEngine.clearCurrentStroke()
+            smudgePickupTexture = nil
             return
         }
 
-        // Record pre-stroke state for undo (HistoryManager snapshots internally)
         history.record(layerIndex: layerStack.activeIndex, currentTexture: layer.texture)
 
-        // Render stamps onto the active layer texture
         guard let cmdBuf = commandQueue.makeCommandBuffer() else { return }
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture     = layer.texture
         pass.colorAttachments[0].loadAction  = .load
         pass.colorAttachments[0].storeAction = .store
 
+        let activeTool = brushEngine.activeTool
+        let pipeline: MTLRenderPipelineState
+        switch activeTool {
+        case .eraser: pipeline = erasePipeline
+        case .smudge: pipeline = smudgePipeline
+        default:      pipeline = stampPipeline
+        }
+
         if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: pass) {
-            enc.setRenderPipelineState(stampPipeline)
+            enc.setRenderPipelineState(pipeline)
+            if activeTool == .smudge, let pickup = smudgePickupTexture {
+                enc.setFragmentTexture(pickup, index: 0)
+            }
             let dSize = CGSize(width: layer.texture.width, height: layer.texture.height)
             for stamp in stamps {
                 var u = stamp.uniforms(drawableSize: dSize, scale: 1.0)
@@ -222,6 +281,23 @@ final class MetalCanvasView: MTKView {
         cmdBuf.waitUntilCompleted()
 
         brushEngine.clearCurrentStroke()
+        smudgePickupTexture = nil
+    }
+
+    private func copyTexture(_ src: MTLTexture) -> MTLTexture? {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: src.pixelFormat, width: src.width, height: src.height, mipmapped: false
+        )
+        desc.usage = [.renderTarget, .shaderRead]
+        desc.storageMode = .private
+        guard let dst = device!.makeTexture(descriptor: desc),
+              let cmd = commandQueue.makeCommandBuffer(),
+              let enc = cmd.makeBlitCommandEncoder()
+        else { return nil }
+        enc.copy(from: src, to: dst)
+        enc.endEncoding()
+        cmd.commit()
+        return dst
     }
 
     // MARK: - Public API
@@ -229,6 +305,7 @@ final class MetalCanvasView: MTKView {
     func setBrushColor(_ color: UIColor)    { brushEngine.brushColor   = color   }
     func setBrushSize(_ size: Float)        { brushEngine.brushSize    = size    }
     func setBrushOpacity(_ opacity: Float)  { brushEngine.brushOpacity = opacity }
+    func setActiveTool(_ tool: DrawingTool) { brushEngine.activeTool   = tool    }
 
     func undo() {
         brushEngine.clearCurrentStroke()

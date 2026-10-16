@@ -76,6 +76,54 @@ vertex StampVOut stampVertexShader(
     return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 3 — Eraser stamp (same shape as brush, cuts alpha out of layer)
+// Uses erase blend: src*(0,0) + dst*(1-srcAlpha,1-srcAlpha)
+// ─────────────────────────────────────────────────────────────────────────────
+
+fragment float4 eraseFragmentShader(
+    StampVOut               in [[stage_in]],
+    constant BrushUniforms& u  [[buffer(0)]]
+) {
+    float tiltFactor = 1.0 - (u.altitude / (M_PI_F / 2.0));
+    float aspectRatio = 1.0 + tiltFactor * 5.0;
+    float cosA = cos(-u.azimuth); float sinA = sin(-u.azimuth);
+    float2 uv  = in.stampUV;
+    float2 rot = float2(uv.x*cosA - uv.y*sinA, uv.x*sinA + uv.y*cosA);
+    float2 squished = float2(rot.x, rot.y * aspectRatio);
+    float dist = length(squished);
+    float alpha = smoothstep(1.0, 0.7, dist) * u.opacity;
+    if (alpha < 0.005) discard_fragment();
+    return float4(0.0, 0.0, 0.0, alpha);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 4 — Smudge stamp (samples pickup texture at stamp centre)
+// texture(0) = snapshot of the layer taken at stroke-begin
+// ─────────────────────────────────────────────────────────────────────────────
+
+fragment float4 smudgeFragmentShader(
+    StampVOut               in     [[stage_in]],
+    constant BrushUniforms& u      [[buffer(0)]],
+    texture2d<float>        pickup [[texture(0)]]
+) {
+    float tiltFactor = 1.0 - (u.altitude / (M_PI_F / 2.0));
+    float aspectRatio = 1.0 + tiltFactor * 5.0;
+    float cosA = cos(-u.azimuth); float sinA = sin(-u.azimuth);
+    float2 uv  = in.stampUV;
+    float2 rot = float2(uv.x*cosA - uv.y*sinA, uv.x*sinA + uv.y*cosA);
+    float2 squished = float2(rot.x, rot.y * aspectRatio);
+    float dist = length(squished);
+    float alpha = smoothstep(1.0, 0.7, dist) * u.opacity;
+    if (alpha < 0.005) discard_fragment();
+
+    // Convert NDC stamp centre to texture UV and sample the pickup colour
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    float2 centerUV = float2((u.position.x + 1.0) * 0.5, (1.0 - u.position.y) * 0.5);
+    float4 pickColor = pickup.sample(s, centerUV);
+    return float4(pickColor.rgb * alpha, alpha);
+}
+
 fragment float4 stampFragmentShader(
     StampVOut               in [[stage_in]],
     constant BrushUniforms& u  [[buffer(0)]]

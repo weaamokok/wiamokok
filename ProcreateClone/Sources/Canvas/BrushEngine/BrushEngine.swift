@@ -6,7 +6,8 @@ final class BrushEngine {
 
     private(set) var currentStrokeStamps: [BrushStamp] = []
 
-    // Public brush settings — written by the toolbar, read each stroke
+    // Public settings — written by the toolbar / tool picker, read each stroke
+    var activeTool: DrawingTool = .brush
     var brushColor: UIColor = .black
     var brushSize: Float = 20        // points diameter
     var brushOpacity: Float = 0.85

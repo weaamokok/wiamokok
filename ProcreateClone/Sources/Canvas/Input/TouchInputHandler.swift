@@ -12,12 +12,14 @@ struct TouchPoint {
 @MainActor
 final class TouchInputHandler {
 
+    var onStrokeBegin: (() -> Void)?
     var onStrokeUpdate: (([TouchPoint]) -> Void)?
     var onStrokeEnd: (() -> Void)?
 
     /// Process began touches — start a new stroke.
     func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?, in view: UIView) {
         guard let touch = touches.first else { return }
+        onStrokeBegin?()
         let pts = coalesced(touch: touch, event: event, view: view)
         onStrokeUpdate?(pts)
     }

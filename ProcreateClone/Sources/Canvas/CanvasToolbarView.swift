@@ -5,6 +5,7 @@ struct CanvasToolbarView: View {
     @Binding var brushColor: Color
     @Binding var brushSize: Float
     @Binding var brushOpacity: Float
+    @Binding var activeTool: DrawingTool
     @ObservedObject var layerStack: LayerStack
     @ObservedObject var history: HistoryManager
 
@@ -24,6 +25,12 @@ struct CanvasToolbarView: View {
                 .frame(width: 44)
                 .padding(.leading, 12)
                 .padding(.top, 100)
+
+            // ── Tool picker (bottom-left) ────────────────────────────────────
+            ToolPickerView(activeTool: $activeTool)
+                .padding(.leading, 12)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 32)
 
             // ── Top bar ─────────────────────────────────────────────────────
             HStack(spacing: 0) {

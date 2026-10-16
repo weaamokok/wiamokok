@@ -11,6 +11,7 @@ final class CanvasViewController: UIViewController {
     private var brushColor: Color = .black   { didSet { applyBrushSettings() } }
     private var brushSize: Float  = 20       { didSet { applyBrushSettings() } }
     private var brushOpacity: Float = 0.85  { didSet { applyBrushSettings() } }
+    private var activeTool: DrawingTool = .brush { didSet { metalCanvas.setActiveTool(activeTool) } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -40,6 +41,7 @@ final class CanvasViewController: UIViewController {
             brushColor:   Binding(get: { self.brushColor },   set: { self.brushColor   = $0 }),
             brushSize:    Binding(get: { self.brushSize },    set: { self.brushSize    = $0 }),
             brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
+            activeTool:   Binding(get: { self.activeTool },   set: { self.activeTool   = $0 }),
             layerStack:   metalCanvas.layerStack,
             history:      metalCanvas.history,
             onClose: { [weak self] in self?.onDismiss?() },
