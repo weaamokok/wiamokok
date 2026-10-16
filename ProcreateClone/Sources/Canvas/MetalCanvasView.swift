@@ -22,9 +22,9 @@ final class MetalCanvasView: MTKView {
     // MARK: - App objects
 
     private(set) var layerStack: LayerStack!
+    private(set) var history: HistoryManager!
     private var brushEngine: BrushEngine!
     private var inputHandler: TouchInputHandler!
-    private var undoStack: [(layerIndex: Int, snapshot: MTLTexture)] = []
 
     // MARK: - Init
 
@@ -53,6 +53,7 @@ final class MetalCanvasView: MTKView {
         buildPipelines(gpu: gpu)
 
         layerStack  = LayerStack(device: gpu)
+        history     = HistoryManager(device: gpu, commandQueue: commandQueue)
         brushEngine = BrushEngine(device: gpu)
 
         inputHandler = TouchInputHandler()
@@ -196,11 +197,8 @@ final class MetalCanvasView: MTKView {
             return
         }
 
-        // Undo snapshot — just the active layer texture
-        if let snap = copyTexture(layer.texture) {
-            undoStack.append((layerIndex: layerStack.activeIndex, snapshot: snap))
-            if undoStack.count > 100 { undoStack.removeFirst() }
-        }
+        // Record pre-stroke state for undo (HistoryManager snapshots internally)
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: layer.texture)
 
         // Render stamps onto the active layer texture
         guard let cmdBuf = commandQueue.makeCommandBuffer() else { return }
@@ -233,22 +231,18 @@ final class MetalCanvasView: MTKView {
     func setBrushOpacity(_ opacity: Float)  { brushEngine.brushOpacity = opacity }
 
     func undo() {
-        guard let entry = undoStack.popLast() else { return }
-        guard layerStack.layers.indices.contains(entry.layerIndex) else { return }
-        if let blit = commandQueue.makeCommandBuffer(),
-           let enc  = blit.makeBlitCommandEncoder() {
-            enc.copy(from: entry.snapshot, to: layerStack.layers[entry.layerIndex].texture)
-            enc.endEncoding()
-            blit.commit()
-        }
         brushEngine.clearCurrentStroke()
+        history.undo(layers: layerStack.layers)
+    }
+
+    func redo() {
+        brushEngine.clearCurrentStroke()
+        history.redo(layers: layerStack.layers)
     }
 
     func clearCanvas() {
         guard let layer = layerStack.activeLayer else { return }
-        if let snap = copyTexture(layer.texture) {
-            undoStack.append((layerIndex: layerStack.activeIndex, snapshot: snap))
-        }
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: layer.texture)
         clearLayerTexture(layer.texture, isBackground: layerStack.activeIndex == 0)
         brushEngine.clearCurrentStroke()
     }
@@ -264,24 +258,6 @@ final class MetalCanvasView: MTKView {
             : MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
         cmd.commit()
-    }
-
-    // MARK: - Texture copy
-
-    private func copyTexture(_ src: MTLTexture) -> MTLTexture? {
-        let desc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: src.pixelFormat, width: src.width, height: src.height, mipmapped: false
-        )
-        desc.usage = [.renderTarget, .shaderRead]
-        desc.storageMode = .private
-        guard let dst = device?.makeTexture(descriptor: desc),
-              let cmd  = commandQueue.makeCommandBuffer(),
-              let enc  = cmd.makeBlitCommandEncoder()
-        else { return nil }
-        enc.copy(from: src, to: dst)
-        enc.endEncoding()
-        cmd.commit()
-        return dst
     }
 
     // MARK: - Touch forwarding

@@ -8,26 +8,16 @@ final class CanvasViewController: UIViewController {
     private var metalCanvas: MetalCanvasView!
     private var toolbarHost: UIHostingController<CanvasToolbarView>!
 
-    // Toolbar state — observed by SwiftUI toolbar, applied to brush engine each frame
-    private var brushColor: Color = .black {
-        didSet { applyBrushSettings() }
-    }
-    private var brushSize: Float = 20 {
-        didSet { applyBrushSettings() }
-    }
-    private var brushOpacity: Float = 0.85 {
-        didSet { applyBrushSettings() }
-    }
+    private var brushColor: Color = .black   { didSet { applyBrushSettings() } }
+    private var brushSize: Float  = 20       { didSet { applyBrushSettings() } }
+    private var brushOpacity: Float = 0.85  { didSet { applyBrushSettings() } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .white
         setupCanvas()
         setupToolbar()
-        // 2-finger tap = undo, 3-finger tap = redo (standard Procreate gestures)
-        let twoFinger = UITapGestureRecognizer(target: self, action: #selector(undoTapped))
-        twoFinger.numberOfTouchesRequired = 2
-        view.addGestureRecognizer(twoFinger)
+        setupGestures()
     }
 
     // MARK: - Setup
@@ -51,8 +41,10 @@ final class CanvasViewController: UIViewController {
             brushSize:    Binding(get: { self.brushSize },    set: { self.brushSize    = $0 }),
             brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
             layerStack:   metalCanvas.layerStack,
+            history:      metalCanvas.history,
             onClose: { [weak self] in self?.onDismiss?() },
             onUndo:  { [weak self] in self?.metalCanvas.undo() },
+            onRedo:  { [weak self] in self?.metalCanvas.redo() },
             onClear: { [weak self] in self?.metalCanvas.clearCanvas() }
         )
 
@@ -73,6 +65,21 @@ final class CanvasViewController: UIViewController {
         ])
     }
 
+    private func setupGestures() {
+        // 2-finger tap → undo  (Procreate standard)
+        let twoFinger = UITapGestureRecognizer(target: self, action: #selector(undoGesture))
+        twoFinger.numberOfTouchesRequired = 2
+        view.addGestureRecognizer(twoFinger)
+
+        // 3-finger tap → redo
+        let threeFinger = UITapGestureRecognizer(target: self, action: #selector(redoGesture))
+        threeFinger.numberOfTouchesRequired = 3
+        view.addGestureRecognizer(threeFinger)
+
+        // Let drawing touches through even when multi-finger gestures are recognised
+        twoFinger.require(toFail: threeFinger)
+    }
+
     // MARK: - Brush sync
 
     private func applyBrushSettings() {
@@ -84,5 +91,6 @@ final class CanvasViewController: UIViewController {
 
     // MARK: - Actions
 
-    @objc private func undoTapped() { metalCanvas.undo() }
+    @objc private func undoGesture() { metalCanvas.undo() }
+    @objc private func redoGesture() { metalCanvas.redo() }
 }
