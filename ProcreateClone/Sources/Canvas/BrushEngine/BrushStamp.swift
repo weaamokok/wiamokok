@@ -1,4 +1,5 @@
 import simd
+import UIKit
 
 /// One "stamp" of the brush — a single disc drawn at a point along the stroke.
 struct BrushStamp {

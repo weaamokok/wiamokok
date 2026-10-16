@@ -9,6 +9,7 @@ struct TouchPoint {
     let altitude: Float   // pencil altitude (tilt) in radians
 }
 
+@MainActor
 final class TouchInputHandler {
 
     var onStrokeUpdate: (([TouchPoint]) -> Void)?
