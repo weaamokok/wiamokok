@@ -127,6 +127,36 @@ fragment float4 smudgeFragmentShader(
     return float4(pickColor.rgb * alpha, alpha);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 5 — Selection extract: copy masked pixels from layer → content tex
+// texture(0) = source layer, texture(1) = mask (.r8Unorm, 1=selected)
+// ─────────────────────────────────────────────────────────────────────────────
+
+fragment float4 selectionExtractFragmentShader(
+    BlitVOut              in   [[stage_in]],
+    texture2d<float>      src  [[texture(0)]],
+    texture2d<float>      mask [[texture(1)]]
+) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    if (mask.sample(s, in.uv).r < 0.5) discard_fragment();
+    return src.sample(s, in.uv);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 6 — Selection clear: overwrite masked pixels with fill colour
+// texture(0) = mask, buffer(1) = fill float4
+// ─────────────────────────────────────────────────────────────────────────────
+
+fragment float4 selectionClearFragmentShader(
+    BlitVOut              in   [[stage_in]],
+    texture2d<float>      mask [[texture(0)]],
+    constant float4&      fill [[buffer(1)]]
+) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    if (mask.sample(s, in.uv).r < 0.5) discard_fragment();
+    return fill;
+}
+
 fragment float4 stampFragmentShader(
     StampVOut               in [[stage_in]],
     constant BrushUniforms& u  [[buffer(0)]]

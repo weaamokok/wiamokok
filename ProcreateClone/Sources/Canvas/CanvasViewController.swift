@@ -1,7 +1,10 @@
 import UIKit
 import SwiftUI
+import Combine
 
 final class CanvasViewController: UIViewController {
+
+    private var cancellables = Set<AnyCancellable>()
 
     var onDismiss: (() -> Void)?
     var document: DrawingDocument?
@@ -18,6 +21,7 @@ final class CanvasViewController: UIViewController {
     private var spacing: Float  = BrushPreset.round.spacing  { didSet { metalCanvas.setSpacing(spacing)  } }
 
     private var autosaveTimer: Timer?
+    private var overlayHost: UIHostingController<SelectionOverlayView>?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -54,6 +58,15 @@ final class CanvasViewController: UIViewController {
         metalCanvas.onStrokeCommitted = { [weak self] in
             self?.scheduleAutosave()
         }
+
+        // Observe selection state to show/hide overlay
+        metalCanvas.selectionState.$isActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] active in
+                if active { self?.showSelectionOverlay() }
+                else       { self?.hideSelectionOverlay() }
+            }
+            .store(in: &cancellables)
     }
 
     private func setupToolbar() {
@@ -101,6 +114,69 @@ final class CanvasViewController: UIViewController {
         view.addGestureRecognizer(threeFinger)
 
         twoFinger.require(toFail: threeFinger)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(selectionPan(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = self
+        metalCanvas.addGestureRecognizer(pan)
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(selectionPinch(_:)))
+        pinch.delegate = self
+        metalCanvas.addGestureRecognizer(pinch)
+    }
+
+    // MARK: - Selection overlay
+
+    private func showSelectionOverlay() {
+        guard overlayHost == nil else { return }
+        let overlay = SelectionOverlayView(
+            state:    metalCanvas.selectionState,
+            onDone:   { [weak self] in self?.metalCanvas.commitSelection() },
+            onCancel: { [weak self] in self?.metalCanvas.cancelSelection() }
+        )
+        let host = UIHostingController(rootView: overlay)
+        host.view.backgroundColor = .clear
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        host.view.isUserInteractionEnabled = true
+        addChild(host)
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+        NSLayoutConstraint.activate([
+            host.view.topAnchor.constraint(equalTo: view.topAnchor),
+            host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        overlayHost = host
+    }
+
+    private func hideSelectionOverlay() {
+        overlayHost?.willMove(toParent: nil)
+        overlayHost?.view.removeFromSuperview()
+        overlayHost?.removeFromParent()
+        overlayHost = nil
+    }
+
+    // MARK: - Selection transform gestures
+
+    @objc private func selectionPan(_ g: UIPanGestureRecognizer) {
+        guard metalCanvas.selectionState.isActive else { return }
+        let delta = g.translation(in: metalCanvas)
+        g.setTranslation(.zero, in: metalCanvas)
+        let existing = metalCanvas.selectionState.transform
+        metalCanvas.selectionState.transform = existing.translatedBy(x: delta.x, y: delta.y)
+    }
+
+    @objc private func selectionPinch(_ g: UIPinchGestureRecognizer) {
+        guard metalCanvas.selectionState.isActive else { return }
+        let s = g.scale
+        g.scale = 1
+        let existing = metalCanvas.selectionState.transform
+        let center = g.location(in: metalCanvas)
+        metalCanvas.selectionState.transform = existing
+            .translatedBy(x: center.x, y: center.y)
+            .scaledBy(x: s, y: s)
+            .translatedBy(x: -center.x, y: -center.y)
     }
 
     // MARK: - Document load
@@ -164,4 +240,18 @@ final class CanvasViewController: UIViewController {
 
     @objc private func undoGesture() { metalCanvas.undo() }
     @objc private func redoGesture() { metalCanvas.redo() }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension CanvasViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldReceive touch: UITouch) -> Bool {
+        metalCanvas.selectionState.isActive
+    }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
 }
