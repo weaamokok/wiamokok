@@ -11,15 +11,18 @@
 		28B6B001736E1D2609616A91 /* CanvasViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8B45EFC142E1BE35A6E833A /* CanvasViewController.swift */; };
 		425605A2E50768B4C8EC5343 /* BrushEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510039879CD6EF54C3E4A4E0 /* BrushEngine.swift */; };
 		43F6DE913249F73DF4012C64 /* MetalCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */; };
+		69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 356455AACA98408A2F03E648 /* CanvasToolbarView.swift */; };
 		7A88A3AB95F80D83A54602A5 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 0AC75208284F61A8533B6C25 /* Shaders.metal */; };
 		987F4C9904A21F74F182644D /* TouchInputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */; };
 		A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089F89526060D113CF2CFA4 /* BrushStamp.swift */; };
 		C083BF4AB73DE03A75B35776 /* CanvasContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */; };
 		F7A09D635D58A0F8649F535A /* ProcreateCloneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */; };
+		F9765F523820E5D6E436853E /* ColorWheelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0AC75208284F61A8533B6C25 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		356455AACA98408A2F03E648 /* CanvasToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasToolbarView.swift; sourceTree = "<group>"; };
 		510039879CD6EF54C3E4A4E0 /* BrushEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushEngine.swift; sourceTree = "<group>"; };
 		7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcreateCloneApp.swift; sourceTree = "<group>"; };
 		902C566AEAC0EF5B12E81ABF /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
@@ -29,6 +32,7 @@
 		DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCanvasView.swift; sourceTree = "<group>"; };
 		DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchInputHandler.swift; sourceTree = "<group>"; };
 		DEAC480DE221513C72B05795 /* ProcreateClone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ProcreateClone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorWheelView.swift; sourceTree = "<group>"; };
 		FA9974D41F7947B361F01EDD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -37,6 +41,7 @@
 			isa = PBXGroup;
 			children = (
 				CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */,
+				356455AACA98408A2F03E648 /* CanvasToolbarView.swift */,
 				C8B45EFC142E1BE35A6E833A /* CanvasViewController.swift */,
 				DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */,
 				D2B639A98CA850D6CA1C2908 /* BrushEngine */,
@@ -56,6 +61,7 @@
 		75517C9ECA8C0721208D1700 /* Tools */ = {
 			isa = PBXGroup;
 			children = (
+				A777B0D5D292BB268D86722D /* ColorWheel */,
 			);
 			path = Tools;
 			sourceTree = "<group>";
@@ -77,6 +83,14 @@
 				FA9974D41F7947B361F01EDD /* Info.plist */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A777B0D5D292BB268D86722D /* ColorWheel */ = {
+			isa = PBXGroup;
+			children = (
+				F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */,
+			);
+			path = ColorWheel;
 			sourceTree = "<group>";
 		};
 		C0B62E6B32EC349B3B57BE64 /* Products */ = {
@@ -183,7 +197,9 @@
 				425605A2E50768B4C8EC5343 /* BrushEngine.swift in Sources */,
 				A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */,
 				C083BF4AB73DE03A75B35776 /* CanvasContainerView.swift in Sources */,
+				69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */,
 				28B6B001736E1D2609616A91 /* CanvasViewController.swift in Sources */,
+				F9765F523820E5D6E436853E /* ColorWheelView.swift in Sources */,
 				156FCD805DD574FCE9853490 /* GalleryView.swift in Sources */,
 				43F6DE913249F73DF4012C64 /* MetalCanvasView.swift in Sources */,
 				F7A09D635D58A0F8649F535A /* ProcreateCloneApp.swift in Sources */,

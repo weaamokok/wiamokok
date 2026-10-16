@@ -242,6 +242,10 @@ final class MetalCanvasView: MTKView {
 
     // MARK: - Public API
 
+    func setBrushColor(_ color: UIColor) { brushEngine.brushColor = color }
+    func setBrushSize(_ size: Float)     { brushEngine.brushSize  = size  }
+    func setBrushOpacity(_ opacity: Float) { brushEngine.brushOpacity = opacity }
+
     func undo() {
         guard let snap = undoStack.popLast(), let canvas = canvasTexture else { return }
         blitTexture(src: snap, dst: canvas)

@@ -6,88 +6,82 @@ final class CanvasViewController: UIViewController {
     var onDismiss: (() -> Void)?
 
     private var metalCanvas: MetalCanvasView!
-    private var toolbar: UIView!
+    private var toolbarHost: UIHostingController<CanvasToolbarView>!
+
+    // Toolbar state — observed by SwiftUI toolbar, applied to brush engine each frame
+    private var brushColor: Color = .black {
+        didSet { applyBrushSettings() }
+    }
+    private var brushSize: Float = 20 {
+        didSet { applyBrushSettings() }
+    }
+    private var brushOpacity: Float = 0.85 {
+        didSet { applyBrushSettings() }
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-        setupMetalCanvas()
+        view.backgroundColor = .white
+        setupCanvas()
         setupToolbar()
+        // 2-finger tap = undo, 3-finger tap = redo (standard Procreate gestures)
+        let twoFinger = UITapGestureRecognizer(target: self, action: #selector(undoTapped))
+        twoFinger.numberOfTouchesRequired = 2
+        view.addGestureRecognizer(twoFinger)
     }
 
-    private func setupMetalCanvas() {
+    // MARK: - Setup
+
+    private func setupCanvas() {
         metalCanvas = MetalCanvasView(frame: .zero)
         metalCanvas.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(metalCanvas)
-
         NSLayoutConstraint.activate([
             metalCanvas.topAnchor.constraint(equalTo: view.topAnchor),
             metalCanvas.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             metalCanvas.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             metalCanvas.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        applyBrushSettings()
     }
 
     private func setupToolbar() {
-        toolbar = UIView()
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.9)
-        toolbar.layer.cornerRadius = 16
-        toolbar.layer.shadowColor = UIColor.black.cgColor
-        toolbar.layer.shadowOpacity = 0.15
-        toolbar.layer.shadowRadius = 8
-        view.addSubview(toolbar)
+        let toolbar = CanvasToolbarView(
+            brushColor: Binding(get: { self.brushColor }, set: { self.brushColor = $0 }),
+            brushSize:  Binding(get: { self.brushSize  }, set: { self.brushSize  = $0 }),
+            brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
+            onClose: { [weak self] in self?.onDismiss?() },
+            onUndo:  { [weak self] in self?.metalCanvas.undo() },
+            onClear: { [weak self] in self?.metalCanvas.clearCanvas() }
+        )
 
-        let closeButton = UIButton(type: .system)
-        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        closeButton.tintColor = .secondaryLabel
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        toolbarHost = UIHostingController(rootView: toolbar)
+        toolbarHost.view.backgroundColor = .clear
+        toolbarHost.view.translatesAutoresizingMaskIntoConstraints = false
+        toolbarHost.view.isUserInteractionEnabled = true
 
-        let undoButton = UIButton(type: .system)
-        undoButton.setImage(UIImage(systemName: "arrow.uturn.backward"), for: .normal)
-        undoButton.tintColor = .label
-        undoButton.translatesAutoresizingMaskIntoConstraints = false
-        undoButton.addTarget(self, action: #selector(undoTapped), for: .touchUpInside)
-
-        let clearButton = UIButton(type: .system)
-        clearButton.setImage(UIImage(systemName: "trash"), for: .normal)
-        clearButton.tintColor = .systemRed
-        clearButton.translatesAutoresizingMaskIntoConstraints = false
-        clearButton.addTarget(self, action: #selector(clearTapped), for: .touchUpInside)
-
-        let stack = UIStackView(arrangedSubviews: [closeButton, undoButton, clearButton])
-        stack.axis = .horizontal
-        stack.spacing = 20
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.addSubview(stack)
+        addChild(toolbarHost)
+        view.addSubview(toolbarHost.view)
+        toolbarHost.didMove(toParent: self)
 
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            toolbar.heightAnchor.constraint(equalToConstant: 52),
-
-            stack.centerXAnchor.constraint(equalTo: toolbar.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            stack.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -16),
+            toolbarHost.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            toolbarHost.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            toolbarHost.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            toolbarHost.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-
-        // Two-finger tap = undo
-        let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(undoTapped))
-        twoFingerTap.numberOfTouchesRequired = 2
-        view.addGestureRecognizer(twoFingerTap)
     }
 
-    @objc private func closeTapped() {
-        onDismiss?()
+    // MARK: - Brush sync
+
+    private func applyBrushSettings() {
+        guard let canvas = metalCanvas else { return }
+        canvas.setBrushColor(UIColor(brushColor))
+        canvas.setBrushSize(brushSize)
+        canvas.setBrushOpacity(brushOpacity)
     }
 
-    @objc private func undoTapped() {
-        metalCanvas.undo()
-    }
+    // MARK: - Actions
 
-    @objc private func clearTapped() {
-        metalCanvas.clearCanvas()
-    }
+    @objc private func undoTapped() { metalCanvas.undo() }
 }

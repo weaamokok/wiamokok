@@ -10,7 +10,9 @@ struct BrushUniforms {
     float  size;       // NDC half-size of the stamp quad (half-width in NDC space)
     float  opacity;
     float4 color;      // (r, g, b, opacity) pre-multiplied when drawing
-    float2 ndcScale;   // 2/drawableW, 2/drawableH — reserved for future anisotropic brushes
+    float2 ndcScale;   // 2/drawableW, 2/drawableH
+    float  azimuth;    // pencil tip direction in radians
+    float  altitude;   // pencil tilt from surface: π/2 = upright, 0 = flat
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,9 +77,23 @@ fragment float4 stampFragmentShader(
     StampVOut               in [[stage_in]],
     constant BrushUniforms& u  [[buffer(0)]]
 ) {
-    float dist = length(in.stampUV);
+    // ── Tilt-based ellipse deformation ──────────────────────────────────────
+    // altitude π/2 = upright pencil → circle (aspect 1)
+    // altitude 0   = flat pencil   → wide ellipse (aspect up to 6)
+    float tiltFactor = 1.0 - (u.altitude / (M_PI_F / 2.0));   // 0 (upright) → 1 (flat)
+    float aspectRatio = 1.0 + tiltFactor * 5.0;                 // 1 → 6
 
-    // Smooth disc: full alpha inside 0.7, fades to 0 at radius 1.0
+    // Rotate stamp UV so azimuth aligns with X-axis, then squish Y
+    float cosA = cos(-u.azimuth);
+    float sinA = sin(-u.azimuth);
+    float2 uv  = in.stampUV;
+    float2 rot = float2(uv.x * cosA - uv.y * sinA,
+                        uv.x * sinA + uv.y * cosA);
+    // Compress perpendicular axis to create an ellipse elongated along azimuth
+    float2 squished = float2(rot.x, rot.y * aspectRatio);
+    float dist = length(squished);
+
+    // Smooth disc edge: full inside 0.7, fades to 0 at 1.0
     float alpha = smoothstep(1.0, 0.7, dist) * u.opacity;
     if (alpha < 0.005) discard_fragment();
 

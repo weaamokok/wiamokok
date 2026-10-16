@@ -1,34 +1,32 @@
 import Metal
+import UIKit
 
 /// Converts incoming TouchPoints into BrushStamp arrays for the renderer.
-/// Sprint 1: simple round brush with pressure → size mapping.
 final class BrushEngine {
 
     private(set) var currentStrokeStamps: [BrushStamp] = []
 
-    // Brush settings (will be exposed to UI in Sprint 8)
-    var brushColor: (r: Float, g: Float, b: Float) = (0, 0, 0)
-    var baseOpacity: Float = 0.8
-    var spacing: Float = 0.2  // fraction of brush size between stamps
+    // Public brush settings — written by the toolbar, read each stroke
+    var brushColor: UIColor = .black
+    var brushSize: Float = 20        // points diameter
+    var brushOpacity: Float = 0.85
+    var spacing: Float = 0.22        // fraction of brush diameter between stamps
 
     private var lastPoint: TouchPoint?
 
     init(device: MTLDevice) {}
 
-    /// Append new touch points from the input handler.
     func addPoints(_ points: [TouchPoint]) {
         for point in points {
             if let last = lastPoint {
                 interpolateStamps(from: last, to: point)
             } else {
-                // First point of stroke
                 placeStamp(at: point)
             }
             lastPoint = point
         }
     }
 
-    /// Called when a stroke finishes (finger/pencil lifted).
     func clearCurrentStroke() {
         currentStrokeStamps.removeAll(keepingCapacity: true)
         lastPoint = nil
@@ -37,24 +35,26 @@ final class BrushEngine {
     // MARK: - Stamp placement
 
     private func placeStamp(at point: TouchPoint) {
+        let (r, g, b) = rgb(from: brushColor)
+        // Pressure scales the per-stamp size within ±40% of base size
+        let stampSize = brushSize * (0.6 + point.pressure * 0.8)
         let stamp = BrushStamp(
             x: point.x,
             y: point.y,
-            size: point.size,
-            opacity: baseOpacity,
-            r: brushColor.r,
-            g: brushColor.g,
-            b: brushColor.b
+            size: stampSize,
+            opacity: brushOpacity * Double(point.pressure + 0.2).clamped(to: 0.1...1.0),
+            r: r, g: g, b: b,
+            azimuth: point.azimuth,
+            altitude: point.altitude
         )
         currentStrokeStamps.append(stamp)
     }
 
-    /// Linearly interpolate stamps between two touch points so the stroke looks continuous.
     private func interpolateStamps(from a: TouchPoint, to b: TouchPoint) {
         let dx = b.x - a.x
         let dy = b.y - a.y
         let dist = sqrt(dx * dx + dy * dy)
-        let avgSize = (a.size + b.size) / 2
+        let avgSize = brushSize * (0.6 + (a.pressure + b.pressure) / 2 * 0.8)
         let step = max(avgSize * spacing, 1)
         guard dist > 0 else { return }
 
@@ -71,5 +71,19 @@ final class BrushEngine {
             )
             placeStamp(at: pt)
         }
+    }
+
+    // MARK: - Helpers
+
+    private func rgb(from color: UIColor) -> (Float, Float, Float) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return (Float(r), Float(g), Float(b))
+    }
+}
+
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Float {
+        Float(Swift.min(Swift.max(self, range.lowerBound), range.upperBound))
     }
 }
