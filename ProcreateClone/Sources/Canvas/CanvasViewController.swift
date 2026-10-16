@@ -47,9 +47,10 @@ final class CanvasViewController: UIViewController {
 
     private func setupToolbar() {
         let toolbar = CanvasToolbarView(
-            brushColor: Binding(get: { self.brushColor }, set: { self.brushColor = $0 }),
-            brushSize:  Binding(get: { self.brushSize  }, set: { self.brushSize  = $0 }),
+            brushColor:   Binding(get: { self.brushColor },   set: { self.brushColor   = $0 }),
+            brushSize:    Binding(get: { self.brushSize },    set: { self.brushSize    = $0 }),
             brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
+            layerStack:   metalCanvas.layerStack,
             onClose: { [weak self] in self?.onDismiss?() },
             onUndo:  { [weak self] in self?.metalCanvas.undo() },
             onClear: { [weak self] in self?.metalCanvas.clearCanvas() }

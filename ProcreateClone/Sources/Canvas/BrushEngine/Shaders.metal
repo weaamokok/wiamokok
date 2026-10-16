@@ -16,8 +16,8 @@ struct BrushUniforms {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pipeline 1 — Blit canvas texture to screen as a fullscreen quad
-// Buffer layout: buffer(0) = array of float4 (x,y,u,v) x 4 vertices (triangle strip)
+// Pipeline 1 — Blit a texture to the current render target (fullscreen quad).
+// buffer(0) = float4[4] vertices (x,y,u,v), buffer(1) = float opacity
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct BlitVOut {
@@ -36,11 +36,14 @@ vertex BlitVOut blitVertexShader(
 }
 
 fragment float4 blitFragmentShader(
-    BlitVOut              in  [[stage_in]],
-    texture2d<float>      tex [[texture(0)]]
+    BlitVOut              in      [[stage_in]],
+    texture2d<float>      tex     [[texture(0)]],
+    constant float&       opacity [[buffer(1)]]
 ) {
     constexpr sampler s(filter::linear, address::clamp_to_edge);
-    return tex.sample(s, in.uv);
+    float4 c = tex.sample(s, in.uv);
+    // Pre-multiply opacity into alpha so the caller can use src-alpha blending
+    return float4(c.rgb * opacity, c.a * opacity);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

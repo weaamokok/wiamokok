@@ -1,26 +1,30 @@
 import MetalKit
 import UIKit
 
-/// GPU-accelerated drawing surface.
-/// Two render pipelines:
-///   • blitPipeline   – composites the persistent canvas texture to the screen.
-///   • stampPipeline  – draws individual brush stamps on top (alpha-blended).
+/// GPU-accelerated drawing surface with multi-layer compositing.
+///
+/// Render loop each frame:
+///   1. Clear composite texture to white.
+///   2. For each visible layer (bottom → top): blit layer texture onto composite (alpha-blended, opacity applied).
+///      If this is the active layer, draw the in-progress stroke stamps on top before moving on.
+///   3. Blit composite to the drawable.
 final class MetalCanvasView: MTKView {
 
     // MARK: - Metal objects
 
     private var commandQueue: MTLCommandQueue!
-    private var blitPipeline: MTLRenderPipelineState!
-    private var stampPipeline: MTLRenderPipelineState!
+    private var blitPipeline:  MTLRenderPipelineState!   // canvas layer → composite
+    private var stampPipeline: MTLRenderPipelineState!   // brush stamps → layer/composite
 
-    /// Persistent canvas (all committed strokes live here).
-    private var canvasTexture: MTLTexture?
+    /// Scratch texture that accumulates all layers before being shown.
+    private var compositeTexture: MTLTexture?
 
     // MARK: - App objects
 
+    private(set) var layerStack: LayerStack!
     private var brushEngine: BrushEngine!
     private var inputHandler: TouchInputHandler!
-    private var undoStack: [MTLTexture] = []
+    private var undoStack: [(layerIndex: Int, snapshot: MTLTexture)] = []
 
     // MARK: - Init
 
@@ -48,39 +52,39 @@ final class MetalCanvasView: MTKView {
         commandQueue = gpu.makeCommandQueue()!
         buildPipelines(gpu: gpu)
 
-        brushEngine  = BrushEngine(device: gpu)
-        inputHandler = TouchInputHandler()
+        layerStack  = LayerStack(device: gpu)
+        brushEngine = BrushEngine(device: gpu)
 
-        inputHandler.onStrokeUpdate = { [weak self] points in
-            self?.brushEngine.addPoints(points)
-        }
-        inputHandler.onStrokeEnd = { [weak self] in
-            self?.commitCurrentStroke()
-        }
+        inputHandler = TouchInputHandler()
+        inputHandler.onStrokeUpdate = { [weak self] pts in self?.brushEngine.addPoints(pts) }
+        inputHandler.onStrokeEnd    = { [weak self] in self?.commitCurrentStroke() }
     }
 
-    // MARK: - Pipeline construction
+    // MARK: - Pipelines
 
     private func buildPipelines(gpu: MTLDevice) {
         guard let lib = gpu.makeDefaultLibrary() else {
-            fatalError("Metal default library not found — ensure Shaders.metal is in the target.")
+            fatalError("Metal default library not found.")
         }
 
-        // ── Blit pipeline (canvas texture → screen) ─────────────────────────
+        // Blit pipeline — alpha-blended so layers composite correctly
         let blitDesc = MTLRenderPipelineDescriptor()
         blitDesc.vertexFunction   = lib.makeFunction(name: "blitVertexShader")
         blitDesc.fragmentFunction = lib.makeFunction(name: "blitFragmentShader")
         blitDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
-        // No blending needed — canvas is opaque background
+        blitDesc.colorAttachments[0].isBlendingEnabled = true
+        blitDesc.colorAttachments[0].sourceRGBBlendFactor        = .sourceAlpha
+        blitDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        blitDesc.colorAttachments[0].sourceAlphaBlendFactor      = .sourceAlpha
+        blitDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         blitPipeline = try! gpu.makeRenderPipelineState(descriptor: blitDesc)
 
-        // ── Stamp pipeline (brush discs → screen, alpha-blended) ─────────────
+        // Stamp pipeline — pre-multiplied alpha
         let stampDesc = MTLRenderPipelineDescriptor()
         stampDesc.vertexFunction   = lib.makeFunction(name: "stampVertexShader")
         stampDesc.fragmentFunction = lib.makeFunction(name: "stampFragmentShader")
         stampDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
         stampDesc.colorAttachments[0].isBlendingEnabled = true
-        // Pre-multiplied alpha blending
         stampDesc.colorAttachments[0].sourceRGBBlendFactor        = .one
         stampDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
         stampDesc.colorAttachments[0].sourceAlphaBlendFactor      = .one
@@ -88,85 +92,97 @@ final class MetalCanvasView: MTKView {
         stampPipeline = try! gpu.makeRenderPipelineState(descriptor: stampDesc)
     }
 
-    // MARK: - Canvas texture lifecycle
+    // MARK: - Layout / texture init
 
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0, bounds.height > 0 else { return }
         let w = Int(bounds.width  * contentScaleFactor)
         let h = Int(bounds.height * contentScaleFactor)
-        if canvasTexture == nil || canvasTexture!.width != w || canvasTexture!.height != h {
-            let old = canvasTexture
-            canvasTexture = makeBlanкTexture(width: w, height: h)
-            // If we had a canvas, copy what fits (resize keeps existing art).
-            if let src = old {
-                blitTexture(src: src, dst: canvasTexture!)
-            }
+        guard compositeTexture == nil || compositeTexture!.width != w else { return }
+
+        compositeTexture = makePrivateTexture(width: w, height: h)
+        Task { @MainActor in
+            layerStack.setCanvasSize(width: w, height: h)
         }
     }
 
-    private func makeBlanкTexture(width: Int, height: Int) -> MTLTexture {
+    private func makePrivateTexture(width: Int, height: Int) -> MTLTexture {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
         )
         desc.usage = [.renderTarget, .shaderRead]
         desc.storageMode = .private
-        let tex = device!.makeTexture(descriptor: desc)!
-        // Fill with white
-        guard let cmd = commandQueue.makeCommandBuffer() else { return tex }
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture     = tex
-        pass.colorAttachments[0].loadAction  = .clear
-        pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor  = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
-        cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
-        cmd.commit()
-        return tex
+        return device!.makeTexture(descriptor: desc)!
     }
 
-    // MARK: - MTKView render loop
+    // MARK: - Render loop
 
     override func draw(_ rect: CGRect) {
         guard
-            let canvas   = canvasTexture,
-            let drawable = currentDrawable,
-            let passDesc = currentRenderPassDescriptor,
-            let cmdBuf   = commandQueue.makeCommandBuffer()
+            let composite = compositeTexture,
+            let drawable  = currentDrawable,
+            let cmdBuf    = commandQueue.makeCommandBuffer()
         else { return }
 
-        passDesc.colorAttachments[0].clearColor  = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
-        passDesc.colorAttachments[0].loadAction  = .clear
-        passDesc.colorAttachments[0].storeAction = .store
+        let layers  = layerStack.layers
+        let activeI = layerStack.activeIndex
+        let stamps  = brushEngine.currentStrokeStamps
+        let dSize   = CGSize(width: self.drawableSize.width, height: self.drawableSize.height)
+        let scale   = Float(contentScaleFactor)
 
-        guard let enc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc) else { return }
+        // ── Pass 1: Composite all layers into compositeTexture ───────────────
+        let compPass = MTLRenderPassDescriptor()
+        compPass.colorAttachments[0].texture     = composite
+        compPass.colorAttachments[0].loadAction  = .clear
+        compPass.colorAttachments[0].storeAction = .store
+        compPass.colorAttachments[0].clearColor  = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
 
-        // 1. Blit committed canvas
-        enc.setRenderPipelineState(blitPipeline)
-        var quad: [Float] = [
-            -1,  1, 0, 0,
-             1,  1, 1, 0,
-            -1, -1, 0, 1,
-             1, -1, 1, 1,
-        ]
-        enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
-        enc.setFragmentTexture(canvas, index: 0)
-        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: compPass) {
+            var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
 
-        // 2. Draw in-progress stroke stamps on top
-        let stamps = brushEngine.currentStrokeStamps
-        if !stamps.isEmpty {
-            enc.setRenderPipelineState(stampPipeline)
-            let dSize = CGSize(width: drawableSize.width, height: drawableSize.height)
-            let scale = Float(contentScaleFactor)
-            for stamp in stamps {
-                var u = stamp.uniforms(drawableSize: dSize, scale: scale)
-                enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
-                enc.setFragmentBytes(&u, length: MemoryLayout<BrushUniforms>.stride, index: 0)
+            for (i, layer) in layers.enumerated() {
+                guard layer.isVisible else { continue }
+
+                // Blit this layer's texture
+                enc.setRenderPipelineState(blitPipeline)
+                enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+                enc.setFragmentTexture(layer.texture, index: 0)
+                var opacity = layer.opacity
+                enc.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 1)
                 enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+
+                // If active layer, draw in-progress stamps on top
+                if i == activeI, !stamps.isEmpty {
+                    enc.setRenderPipelineState(stampPipeline)
+                    for stamp in stamps {
+                        var u = stamp.uniforms(drawableSize: dSize, scale: scale)
+                        enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                        enc.setFragmentBytes(&u, length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                    }
+                }
             }
+            enc.endEncoding()
         }
 
-        enc.endEncoding()
+        // ── Pass 2: Blit compositeTexture to the drawable ────────────────────
+        guard let passDesc = currentRenderPassDescriptor,
+              let finalEnc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc)
+        else {
+            cmdBuf.commit()
+            return
+        }
+
+        finalEnc.setRenderPipelineState(blitPipeline)
+        var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
+        finalEnc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+        finalEnc.setFragmentTexture(composite, index: 0)
+        var fullOpacity: Float = 1.0
+        finalEnc.setFragmentBytes(&fullOpacity, length: MemoryLayout<Float>.stride, index: 1)
+        finalEnc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        finalEnc.endEncoding()
+
         cmdBuf.present(drawable)
         cmdBuf.commit()
     }
@@ -175,27 +191,27 @@ final class MetalCanvasView: MTKView {
 
     private func commitCurrentStroke() {
         let stamps = brushEngine.currentStrokeStamps
-        guard !stamps.isEmpty, let canvas = canvasTexture else {
+        guard !stamps.isEmpty, let layer = layerStack.activeLayer else {
             brushEngine.clearCurrentStroke()
             return
         }
 
-        // Save undo snapshot
-        if let snap = copyTexture(canvas) {
-            undoStack.append(snap)
+        // Undo snapshot — just the active layer texture
+        if let snap = copyTexture(layer.texture) {
+            undoStack.append((layerIndex: layerStack.activeIndex, snapshot: snap))
             if undoStack.count > 100 { undoStack.removeFirst() }
         }
 
-        // Render stamps permanently onto canvasTexture
+        // Render stamps onto the active layer texture
         guard let cmdBuf = commandQueue.makeCommandBuffer() else { return }
-        let passDesc = MTLRenderPassDescriptor()
-        passDesc.colorAttachments[0].texture     = canvas
-        passDesc.colorAttachments[0].loadAction  = .load
-        passDesc.colorAttachments[0].storeAction = .store
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = layer.texture
+        pass.colorAttachments[0].loadAction  = .load
+        pass.colorAttachments[0].storeAction = .store
 
-        if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc) {
+        if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: pass) {
             enc.setRenderPipelineState(stampPipeline)
-            let dSize = CGSize(width: canvas.width, height: canvas.height)
+            let dSize = CGSize(width: layer.texture.width, height: layer.texture.height)
             for stamp in stamps {
                 var u = stamp.uniforms(drawableSize: dSize, scale: 1.0)
                 enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
@@ -210,7 +226,47 @@ final class MetalCanvasView: MTKView {
         brushEngine.clearCurrentStroke()
     }
 
-    // MARK: - Utilities
+    // MARK: - Public API
+
+    func setBrushColor(_ color: UIColor)    { brushEngine.brushColor   = color   }
+    func setBrushSize(_ size: Float)        { brushEngine.brushSize    = size    }
+    func setBrushOpacity(_ opacity: Float)  { brushEngine.brushOpacity = opacity }
+
+    func undo() {
+        guard let entry = undoStack.popLast() else { return }
+        guard layerStack.layers.indices.contains(entry.layerIndex) else { return }
+        if let blit = commandQueue.makeCommandBuffer(),
+           let enc  = blit.makeBlitCommandEncoder() {
+            enc.copy(from: entry.snapshot, to: layerStack.layers[entry.layerIndex].texture)
+            enc.endEncoding()
+            blit.commit()
+        }
+        brushEngine.clearCurrentStroke()
+    }
+
+    func clearCanvas() {
+        guard let layer = layerStack.activeLayer else { return }
+        if let snap = copyTexture(layer.texture) {
+            undoStack.append((layerIndex: layerStack.activeIndex, snapshot: snap))
+        }
+        clearLayerTexture(layer.texture, isBackground: layerStack.activeIndex == 0)
+        brushEngine.clearCurrentStroke()
+    }
+
+    private func clearLayerTexture(_ tex: MTLTexture, isBackground: Bool) {
+        guard let cmd  = commandQueue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = tex
+        pass.colorAttachments[0].loadAction  = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor  = isBackground
+            ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
+            : MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cmd.commit()
+    }
+
+    // MARK: - Texture copy
 
     private func copyTexture(_ src: MTLTexture) -> MTLTexture? {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
@@ -219,51 +275,13 @@ final class MetalCanvasView: MTKView {
         desc.usage = [.renderTarget, .shaderRead]
         desc.storageMode = .private
         guard let dst = device?.makeTexture(descriptor: desc),
-              let cmd = commandQueue.makeCommandBuffer()
+              let cmd  = commandQueue.makeCommandBuffer(),
+              let enc  = cmd.makeBlitCommandEncoder()
         else { return nil }
-        blitTexture(src: src, dst: dst, commandBuffer: cmd)
+        enc.copy(from: src, to: dst)
+        enc.endEncoding()
         cmd.commit()
         return dst
-    }
-
-    private func blitTexture(src: MTLTexture, dst: MTLTexture, commandBuffer: MTLCommandBuffer? = nil) {
-        let cmd = commandBuffer ?? commandQueue.makeCommandBuffer()!
-        guard let enc = cmd.makeBlitCommandEncoder() else { return }
-        let w = min(src.width,  dst.width)
-        let h = min(src.height, dst.height)
-        enc.copy(from: src, sourceSlice: 0, sourceLevel: 0,
-                 sourceOrigin: .init(x: 0, y: 0, z: 0),
-                 sourceSize: .init(width: w, height: h, depth: 1),
-                 to: dst, destinationSlice: 0, destinationLevel: 0,
-                 destinationOrigin: .init(x: 0, y: 0, z: 0))
-        enc.endEncoding()
-        if commandBuffer == nil { cmd.commit() }
-    }
-
-    // MARK: - Public API
-
-    func setBrushColor(_ color: UIColor) { brushEngine.brushColor = color }
-    func setBrushSize(_ size: Float)     { brushEngine.brushSize  = size  }
-    func setBrushOpacity(_ opacity: Float) { brushEngine.brushOpacity = opacity }
-
-    func undo() {
-        guard let snap = undoStack.popLast(), let canvas = canvasTexture else { return }
-        blitTexture(src: snap, dst: canvas)
-        brushEngine.clearCurrentStroke()
-    }
-
-    func clearCanvas() {
-        guard let canvas = canvasTexture else { return }
-        if let snap = copyTexture(canvas) { undoStack.append(snap) }
-        guard let cmd = commandQueue.makeCommandBuffer() else { return }
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture     = canvas
-        pass.colorAttachments[0].loadAction  = .clear
-        pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor  = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
-        cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
-        cmd.commit()
-        brushEngine.clearCurrentStroke()
     }
 
     // MARK: - Touch forwarding

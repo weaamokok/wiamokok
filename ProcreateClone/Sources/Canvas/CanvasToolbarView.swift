@@ -4,16 +4,18 @@ import SwiftUI
 /// Carries: top-bar (close / undo / clear), left size rail, top-right color swatch.
 struct CanvasToolbarView: View {
 
-    // Bound to BrushEngine via CanvasViewController
+    // Bound to BrushEngine + LayerStack via CanvasViewController
     @Binding var brushColor: Color
     @Binding var brushSize: Float
     @Binding var brushOpacity: Float
+    @ObservedObject var layerStack: LayerStack
 
     var onClose: () -> Void
     var onUndo: () -> Void
     var onClear: () -> Void
 
     @State private var showColorPicker = false
+    @State private var showLayers = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -47,6 +49,19 @@ struct CanvasToolbarView: View {
 
                 Spacer()
 
+                // Layers count badge
+                Button { showLayers = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.3.layers.3d")
+                            .font(.system(size: 18))
+                        Text("\(layerStack.count)")
+                            .font(.caption.bold())
+                    }
+                    .foregroundStyle(.primary)
+                    .frame(height: 44)
+                    .padding(.horizontal, 8)
+                }
+
                 // Undo
                 toolbarButton(icon: "arrow.uturn.backward") { onUndo() }
 
@@ -63,11 +78,15 @@ struct CanvasToolbarView: View {
             .padding(.top, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // ── Color picker popover ─────────────────────────────────────────────
+        // ── Color picker sheet ───────────────────────────────────────────────
         .sheet(isPresented: $showColorPicker) {
             ColorPickerSheet(color: $brushColor, opacity: $brushOpacity)
                 .presentationDetents([.fraction(0.55)])
                 .presentationDragIndicator(.visible)
+        }
+        // ── Layers sheet ────────────────────────────────────────────────────
+        .sheet(isPresented: $showLayers) {
+            LayerPanelView(stack: layerStack)
         }
     }
 
