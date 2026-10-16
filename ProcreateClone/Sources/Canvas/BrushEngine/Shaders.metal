@@ -13,6 +13,7 @@ struct BrushUniforms {
     float2 ndcScale;   // 2/drawableW, 2/drawableH
     float  azimuth;    // pencil tip direction in radians
     float  altitude;   // pencil tilt from surface: π/2 = upright, 0 = flat
+    float  softness;   // 0 = hard edge, 1 = fully soft / airbrush
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,7 +93,8 @@ fragment float4 eraseFragmentShader(
     float2 rot = float2(uv.x*cosA - uv.y*sinA, uv.x*sinA + uv.y*cosA);
     float2 squished = float2(rot.x, rot.y * aspectRatio);
     float dist = length(squished);
-    float alpha = smoothstep(1.0, 0.7, dist) * u.opacity;
+    float inner = 1.0 - u.softness;
+    float alpha = smoothstep(1.0, inner, dist) * u.opacity;
     if (alpha < 0.005) discard_fragment();
     return float4(0.0, 0.0, 0.0, alpha);
 }
@@ -114,7 +116,8 @@ fragment float4 smudgeFragmentShader(
     float2 rot = float2(uv.x*cosA - uv.y*sinA, uv.x*sinA + uv.y*cosA);
     float2 squished = float2(rot.x, rot.y * aspectRatio);
     float dist = length(squished);
-    float alpha = smoothstep(1.0, 0.7, dist) * u.opacity;
+    float inner = 1.0 - u.softness;
+    float alpha = smoothstep(1.0, inner, dist) * u.opacity;
     if (alpha < 0.005) discard_fragment();
 
     // Convert NDC stamp centre to texture UV and sample the pickup colour
@@ -144,8 +147,9 @@ fragment float4 stampFragmentShader(
     float2 squished = float2(rot.x, rot.y * aspectRatio);
     float dist = length(squished);
 
-    // Smooth disc edge: full inside 0.7, fades to 0 at 1.0
-    float alpha = smoothstep(1.0, 0.7, dist) * u.opacity;
+    // softness=0 → hard edge (inner~1.0); softness=1 → full airbrush (inner=0)
+    float inner = 1.0 - u.softness;
+    float alpha = smoothstep(1.0, inner, dist) * u.opacity;
     if (alpha < 0.005) discard_fragment();
 
     return float4(u.color.rgb * alpha, alpha);   // pre-multiplied alpha

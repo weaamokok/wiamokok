@@ -6,12 +6,19 @@ final class BrushEngine {
 
     private(set) var currentStrokeStamps: [BrushStamp] = []
 
-    // Public settings — written by the toolbar / tool picker, read each stroke
+    // Public settings — written by toolbar / studio sheet, read each stroke
     var activeTool: DrawingTool = .brush
     var brushColor: UIColor = .black
     var brushSize: Float = 20        // points diameter
     var brushOpacity: Float = 0.85
-    var spacing: Float = 0.22        // fraction of brush diameter between stamps
+    var activePreset: BrushPreset = .round {
+        didSet {
+            spacing = activePreset.spacing
+            softness = activePreset.softness
+        }
+    }
+    var spacing: Float = BrushPreset.round.spacing
+    var softness: Float = BrushPreset.round.softness
 
     private var lastPoint: TouchPoint?
 
@@ -37,16 +44,26 @@ final class BrushEngine {
 
     private func placeStamp(at point: TouchPoint) {
         let (r, g, b) = rgb(from: brushColor)
-        // Pressure scales the per-stamp size within ±40% of base size
-        let stampSize = brushSize * (0.6 + point.pressure * 0.8)
+        let preset = activePreset
+        // Pressure scales size ±40%; jitter adds per-stamp randomness
+        let basePressureSize = brushSize * (0.6 + point.pressure * 0.8)
+        let jitterScale = preset.sizeJitter > 0
+            ? 1.0 + Float.random(in: -preset.sizeJitter...preset.sizeJitter)
+            : 1.0
+        let stampSize = basePressureSize * jitterScale
+
+        let baseOpacity = brushOpacity * Double(point.pressure + 0.2).clamped(to: 0.1...1.0)
+        let opacityShift = preset.opacityJitter > 0
+            ? Float.random(in: -preset.opacityJitter...preset.opacityJitter)
+            : 0
+        let stampOpacity = (baseOpacity + opacityShift).clamped(to: 0.03...1.0)
+
         let stamp = BrushStamp(
-            x: point.x,
-            y: point.y,
-            size: stampSize,
-            opacity: brushOpacity * Double(point.pressure + 0.2).clamped(to: 0.1...1.0),
+            x: point.x, y: point.y,
+            size: stampSize, opacity: stampOpacity,
             r: r, g: g, b: b,
-            azimuth: point.azimuth,
-            altitude: point.altitude
+            azimuth: point.azimuth, altitude: point.altitude,
+            softness: softness
         )
         currentStrokeStamps.append(stamp)
     }
@@ -86,5 +103,11 @@ final class BrushEngine {
 private extension Double {
     func clamped(to range: ClosedRange<Double>) -> Float {
         Float(Swift.min(Swift.max(self, range.lowerBound), range.upperBound))
+    }
+}
+
+private extension Float {
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

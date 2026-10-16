@@ -6,6 +6,9 @@ struct CanvasToolbarView: View {
     @Binding var brushSize: Float
     @Binding var brushOpacity: Float
     @Binding var activeTool: DrawingTool
+    @Binding var activePreset: BrushPreset
+    @Binding var softness: Float
+    @Binding var spacing: Float
     @ObservedObject var layerStack: LayerStack
     @ObservedObject var history: HistoryManager
 
@@ -17,6 +20,7 @@ struct CanvasToolbarView: View {
 
     @State private var showColorPicker = false
     @State private var showLayers = false
+    @State private var showBrushStudio = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -44,6 +48,14 @@ struct CanvasToolbarView: View {
                         .shadow(color: .black.opacity(0.3), radius: 4)
                 }
                 .padding(.leading, 68)
+
+                // Brush studio
+                Button { showBrushStudio.toggle() } label: {
+                    Image(systemName: activePreset.icon)
+                        .font(.system(size: 17))
+                        .frame(width: 44, height: 44)
+                        .foregroundStyle(.primary)
+                }
 
                 Spacer()
 
@@ -100,6 +112,17 @@ struct CanvasToolbarView: View {
         }
         .sheet(isPresented: $showLayers) {
             LayerPanelView(stack: layerStack)
+        }
+        .sheet(isPresented: $showBrushStudio) {
+            BrushStudioView(
+                preset: $activePreset,
+                brushSize: $brushSize,
+                brushOpacity: $brushOpacity,
+                softness: $softness,
+                spacing: $spacing
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 

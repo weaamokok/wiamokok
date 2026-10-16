@@ -12,9 +12,11 @@ struct BrushStamp {
     let b: Float
     let azimuth: Float  // radians — pencil tip direction
     let altitude: Float // radians — pencil tilt from surface (π/2 = upright)
+    let softness: Float // 0 = hard edge, 1 = fully soft/airbrush
 }
 
 /// Uniform block matching the layout expected by Shaders.metal.
+/// Field order must stay identical to the Metal-side struct.
 struct BrushUniforms {
     var position: SIMD2<Float>
     var size: Float
@@ -23,6 +25,7 @@ struct BrushUniforms {
     var ndcScale: SIMD2<Float>  // 2 / drawableWidth,  2 / drawableHeight
     var azimuth: Float          // pencil azimuth in radians (0 = right, CCW)
     var altitude: Float         // pencil altitude in radians (π/2 = upright, 0 = flat)
+    var softness: Float         // 0 = hard, 1 = soft
 }
 
 extension BrushStamp {
@@ -39,7 +42,8 @@ extension BrushStamp {
                 2 / Float(drawableSize.height)
             ),
             azimuth: azimuth,
-            altitude: altitude
+            altitude: altitude,
+            softness: softness
         )
     }
 }

@@ -13,6 +13,9 @@ final class CanvasViewController: UIViewController {
     private var brushSize: Float  = 20       { didSet { applyBrushSettings() } }
     private var brushOpacity: Float = 0.85  { didSet { applyBrushSettings() } }
     private var activeTool: DrawingTool = .brush { didSet { metalCanvas.setActiveTool(activeTool) } }
+    private var activePreset: BrushPreset = .round { didSet { metalCanvas.setActivePreset(activePreset) } }
+    private var softness: Float = BrushPreset.round.softness { didSet { metalCanvas.setSoftness(softness) } }
+    private var spacing: Float  = BrushPreset.round.spacing  { didSet { metalCanvas.setSpacing(spacing)  } }
 
     private var autosaveTimer: Timer?
 
@@ -59,6 +62,9 @@ final class CanvasViewController: UIViewController {
             brushSize:    Binding(get: { self.brushSize },    set: { self.brushSize    = $0 }),
             brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
             activeTool:   Binding(get: { self.activeTool },   set: { self.activeTool   = $0 }),
+            activePreset: Binding(get: { self.activePreset }, set: { self.activePreset = $0 }),
+            softness:     Binding(get: { self.softness },     set: { self.softness     = $0 }),
+            spacing:      Binding(get: { self.spacing },      set: { self.spacing      = $0 }),
             layerStack:   metalCanvas.layerStack,
             history:      metalCanvas.history,
             onClose:  { [weak self] in self?.onDismiss?() },

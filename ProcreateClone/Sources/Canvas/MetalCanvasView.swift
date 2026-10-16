@@ -316,7 +316,10 @@ final class MetalCanvasView: MTKView {
     func setBrushColor(_ color: UIColor)    { brushEngine.brushColor   = color   }
     func setBrushSize(_ size: Float)        { brushEngine.brushSize    = size    }
     func setBrushOpacity(_ opacity: Float)  { brushEngine.brushOpacity = opacity }
-    func setActiveTool(_ tool: DrawingTool) { brushEngine.activeTool   = tool    }
+    func setActiveTool(_ tool: DrawingTool)     { brushEngine.activeTool   = tool    }
+    func setActivePreset(_ p: BrushPreset)      { brushEngine.activePreset = p       }
+    func setSoftness(_ s: Float)                { brushEngine.softness     = s       }
+    func setSpacing(_ s: Float)                 { brushEngine.spacing      = s       }
 
     /// Renders a flat composite of all visible layers and returns it as a UIImage.
     func renderCompositeImage() -> UIImage? {
