@@ -1,0 +1,497 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		004ED69F7406A5533A08829E /* SelectionOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF3040B56E4B89C44E308050 /* SelectionOverlayView.swift */; };
+		156FCD805DD574FCE9853490 /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 902C566AEAC0EF5B12E81ABF /* GalleryView.swift */; };
+		28B6B001736E1D2609616A91 /* CanvasViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8B45EFC142E1BE35A6E833A /* CanvasViewController.swift */; };
+		32BC90C4C733CA75ABCD2A68 /* CanvasLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6ABC98B088972DE4892616D /* CanvasLayer.swift */; };
+		425605A2E50768B4C8EC5343 /* BrushEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510039879CD6EF54C3E4A4E0 /* BrushEngine.swift */; };
+		43F6DE913249F73DF4012C64 /* MetalCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */; };
+		4535C50210FBF0134F6DA881 /* ToolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE99A5A4618F9E3D6F947CD8 /* ToolPickerView.swift */; };
+		52AAD81036C1FB06AC760CC0 /* DrawingTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3937F57D155337674044C48 /* DrawingTool.swift */; };
+		6872E3C09E3893B37B705062 /* DrawingDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8336812EA8DE9C01D0DFD51A /* DrawingDocument.swift */; };
+		69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 356455AACA98408A2F03E648 /* CanvasToolbarView.swift */; };
+		7A88A3AB95F80D83A54602A5 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 0AC75208284F61A8533B6C25 /* Shaders.metal */; };
+		7FFF9B3DF2051A39E42698D0 /* SelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823525530F4A52D4407CC390 /* SelectionState.swift */; };
+		823FBEB790136728B6F2D462 /* ColorLoupeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2C2F74D027214651269544 /* ColorLoupeView.swift */; };
+		987F4C9904A21F74F182644D /* TouchInputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */; };
+		A0CF735EA7F022A485333D46 /* LayerBlendMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */; };
+		A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089F89526060D113CF2CFA4 /* BrushStamp.swift */; };
+		B9ED09964817583BFB309F34 /* LayerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4718B3A4E55B85142C5EB489 /* LayerPanelView.swift */; };
+		C083BF4AB73DE03A75B35776 /* CanvasContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */; };
+		D047F81C6CCB051C66D31F3D /* DocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */; };
+		DB3BA1DD7ACCF740E619F750 /* HistoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB9942C1E1F6C0E1ACDDF41 /* HistoryManager.swift */; };
+		E630A494FCD948549AF08054 /* LayerStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A63D1EDFEABABF733B146BD /* LayerStack.swift */; };
+		E84792BFC1BCA0B78EDEAFEE /* BrushPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5ECA9330C21C40BE350183 /* BrushPreset.swift */; };
+		EEDFB0F65FAD9C8E20F9A15C /* BrushStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2055104D94B28EE6B33EDDDA /* BrushStudioView.swift */; };
+		F7A09D635D58A0F8649F535A /* ProcreateCloneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */; };
+		F9765F523820E5D6E436853E /* ColorWheelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerBlendMode.swift; sourceTree = "<group>"; };
+		0AC75208284F61A8533B6C25 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		0D5ECA9330C21C40BE350183 /* BrushPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushPreset.swift; sourceTree = "<group>"; };
+		2055104D94B28EE6B33EDDDA /* BrushStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushStudioView.swift; sourceTree = "<group>"; };
+		2A63D1EDFEABABF733B146BD /* LayerStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerStack.swift; sourceTree = "<group>"; };
+		356455AACA98408A2F03E648 /* CanvasToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasToolbarView.swift; sourceTree = "<group>"; };
+		4718B3A4E55B85142C5EB489 /* LayerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerPanelView.swift; sourceTree = "<group>"; };
+		4DB9942C1E1F6C0E1ACDDF41 /* HistoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManager.swift; sourceTree = "<group>"; };
+		510039879CD6EF54C3E4A4E0 /* BrushEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushEngine.swift; sourceTree = "<group>"; };
+		7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcreateCloneApp.swift; sourceTree = "<group>"; };
+		823525530F4A52D4407CC390 /* SelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionState.swift; sourceTree = "<group>"; };
+		8336812EA8DE9C01D0DFD51A /* DrawingDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingDocument.swift; sourceTree = "<group>"; };
+		902C566AEAC0EF5B12E81ABF /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
+		B6ABC98B088972DE4892616D /* CanvasLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasLayer.swift; sourceTree = "<group>"; };
+		C089F89526060D113CF2CFA4 /* BrushStamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushStamp.swift; sourceTree = "<group>"; };
+		C3937F57D155337674044C48 /* DrawingTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTool.swift; sourceTree = "<group>"; };
+		C8B45EFC142E1BE35A6E833A /* CanvasViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasViewController.swift; sourceTree = "<group>"; };
+		CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasContainerView.swift; sourceTree = "<group>"; };
+		CF3040B56E4B89C44E308050 /* SelectionOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlayView.swift; sourceTree = "<group>"; };
+		DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCanvasView.swift; sourceTree = "<group>"; };
+		DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchInputHandler.swift; sourceTree = "<group>"; };
+		DEAC480DE221513C72B05795 /* ProcreateClone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ProcreateClone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentStore.swift; sourceTree = "<group>"; };
+		F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorWheelView.swift; sourceTree = "<group>"; };
+		FA2C2F74D027214651269544 /* ColorLoupeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorLoupeView.swift; sourceTree = "<group>"; };
+		FA9974D41F7947B361F01EDD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FE99A5A4618F9E3D6F947CD8 /* ToolPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPickerView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0EEACEF3ED6D765A0C899936 /* Canvas */ = {
+			isa = PBXGroup;
+			children = (
+				CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */,
+				356455AACA98408A2F03E648 /* CanvasToolbarView.swift */,
+				C8B45EFC142E1BE35A6E833A /* CanvasViewController.swift */,
+				FA2C2F74D027214651269544 /* ColorLoupeView.swift */,
+				C3937F57D155337674044C48 /* DrawingTool.swift */,
+				4DB9942C1E1F6C0E1ACDDF41 /* HistoryManager.swift */,
+				DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */,
+				D2B639A98CA850D6CA1C2908 /* BrushEngine */,
+				3950F3598B12B08F78DCFEC7 /* Input */,
+				3FB0591160869AD4FA9E9202 /* Layers */,
+				1F2A6B53D0C93828F58E9F66 /* Selection */,
+			);
+			path = Canvas;
+			sourceTree = "<group>";
+		};
+		1F2A6B53D0C93828F58E9F66 /* Selection */ = {
+			isa = PBXGroup;
+			children = (
+				CF3040B56E4B89C44E308050 /* SelectionOverlayView.swift */,
+				823525530F4A52D4407CC390 /* SelectionState.swift */,
+			);
+			path = Selection;
+			sourceTree = "<group>";
+		};
+		3950F3598B12B08F78DCFEC7 /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		3FB0591160869AD4FA9E9202 /* Layers */ = {
+			isa = PBXGroup;
+			children = (
+				B6ABC98B088972DE4892616D /* CanvasLayer.swift */,
+				06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */,
+				2A63D1EDFEABABF733B146BD /* LayerStack.swift */,
+			);
+			path = Layers;
+			sourceTree = "<group>";
+		};
+		75517C9ECA8C0721208D1700 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				8ECB4FF30EB886B2B6EC80E5 /* BrushStudio */,
+				A777B0D5D292BB268D86722D /* ColorWheel */,
+				7618600D036D4220544BA36C /* LayerPanel */,
+				7B3778F50AFD957710F164E5 /* ToolPicker */,
+			);
+			path = Tools;
+			sourceTree = "<group>";
+		};
+		7618600D036D4220544BA36C /* LayerPanel */ = {
+			isa = PBXGroup;
+			children = (
+				4718B3A4E55B85142C5EB489 /* LayerPanelView.swift */,
+			);
+			path = LayerPanel;
+			sourceTree = "<group>";
+		};
+		7B3778F50AFD957710F164E5 /* ToolPicker */ = {
+			isa = PBXGroup;
+			children = (
+				FE99A5A4618F9E3D6F947CD8 /* ToolPickerView.swift */,
+			);
+			path = ToolPicker;
+			sourceTree = "<group>";
+		};
+		8ECB4FF30EB886B2B6EC80E5 /* BrushStudio */ = {
+			isa = PBXGroup;
+			children = (
+				2055104D94B28EE6B33EDDDA /* BrushStudioView.swift */,
+			);
+			path = BrushStudio;
+			sourceTree = "<group>";
+		};
+		93E6365396F839ED308B5283 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F2EB35A53A8D181BC5FAC849 /* App */,
+				0EEACEF3ED6D765A0C899936 /* Canvas */,
+				D0EF8F97FDA4A8F459244428 /* Gallery */,
+				75517C9ECA8C0721208D1700 /* Tools */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		9F867F183D28F3EA65856C3B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				FA9974D41F7947B361F01EDD /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A777B0D5D292BB268D86722D /* ColorWheel */ = {
+			isa = PBXGroup;
+			children = (
+				F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */,
+			);
+			path = ColorWheel;
+			sourceTree = "<group>";
+		};
+		C0B62E6B32EC349B3B57BE64 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DEAC480DE221513C72B05795 /* ProcreateClone.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CC49C7D8E6951744B603C364 = {
+			isa = PBXGroup;
+			children = (
+				9F867F183D28F3EA65856C3B /* Resources */,
+				93E6365396F839ED308B5283 /* Sources */,
+				C0B62E6B32EC349B3B57BE64 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D0EF8F97FDA4A8F459244428 /* Gallery */ = {
+			isa = PBXGroup;
+			children = (
+				ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */,
+				8336812EA8DE9C01D0DFD51A /* DrawingDocument.swift */,
+				902C566AEAC0EF5B12E81ABF /* GalleryView.swift */,
+			);
+			path = Gallery;
+			sourceTree = "<group>";
+		};
+		D2B639A98CA850D6CA1C2908 /* BrushEngine */ = {
+			isa = PBXGroup;
+			children = (
+				510039879CD6EF54C3E4A4E0 /* BrushEngine.swift */,
+				0D5ECA9330C21C40BE350183 /* BrushPreset.swift */,
+				C089F89526060D113CF2CFA4 /* BrushStamp.swift */,
+				0AC75208284F61A8533B6C25 /* Shaders.metal */,
+			);
+			path = BrushEngine;
+			sourceTree = "<group>";
+		};
+		F2EB35A53A8D181BC5FAC849 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				7BB01D75E4F9E7EA1D5F44D9 /* ProcreateCloneApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AFD963E79ED0D19609AFB29E /* ProcreateClone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E954A62E95300A4FE789254B /* Build configuration list for PBXNativeTarget "ProcreateClone" */;
+			buildPhases = (
+				099A599D740FEDDE8BB89E7C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ProcreateClone;
+			packageProductDependencies = (
+			);
+			productName = ProcreateClone;
+			productReference = DEAC480DE221513C72B05795 /* ProcreateClone.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		686DFDF0ED66A634F7405753 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					AFD963E79ED0D19609AFB29E = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = D23F7B7624F250D1FDAB8E07 /* Build configuration list for PBXProject "ProcreateClone" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = CC49C7D8E6951744B603C364;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C0B62E6B32EC349B3B57BE64 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AFD963E79ED0D19609AFB29E /* ProcreateClone */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		099A599D740FEDDE8BB89E7C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				425605A2E50768B4C8EC5343 /* BrushEngine.swift in Sources */,
+				E84792BFC1BCA0B78EDEAFEE /* BrushPreset.swift in Sources */,
+				A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */,
+				EEDFB0F65FAD9C8E20F9A15C /* BrushStudioView.swift in Sources */,
+				C083BF4AB73DE03A75B35776 /* CanvasContainerView.swift in Sources */,
+				32BC90C4C733CA75ABCD2A68 /* CanvasLayer.swift in Sources */,
+				69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */,
+				28B6B001736E1D2609616A91 /* CanvasViewController.swift in Sources */,
+				823FBEB790136728B6F2D462 /* ColorLoupeView.swift in Sources */,
+				F9765F523820E5D6E436853E /* ColorWheelView.swift in Sources */,
+				D047F81C6CCB051C66D31F3D /* DocumentStore.swift in Sources */,
+				6872E3C09E3893B37B705062 /* DrawingDocument.swift in Sources */,
+				52AAD81036C1FB06AC760CC0 /* DrawingTool.swift in Sources */,
+				156FCD805DD574FCE9853490 /* GalleryView.swift in Sources */,
+				DB3BA1DD7ACCF740E619F750 /* HistoryManager.swift in Sources */,
+				A0CF735EA7F022A485333D46 /* LayerBlendMode.swift in Sources */,
+				B9ED09964817583BFB309F34 /* LayerPanelView.swift in Sources */,
+				E630A494FCD948549AF08054 /* LayerStack.swift in Sources */,
+				43F6DE913249F73DF4012C64 /* MetalCanvasView.swift in Sources */,
+				F7A09D635D58A0F8649F535A /* ProcreateCloneApp.swift in Sources */,
+				004ED69F7406A5533A08829E /* SelectionOverlayView.swift in Sources */,
+				7FFF9B3DF2051A39E42698D0 /* SelectionState.swift in Sources */,
+				7A88A3AB95F80D83A54602A5 /* Shaders.metal in Sources */,
+				4535C50210FBF0134F6DA881 /* ToolPickerView.swift in Sources */,
+				987F4C9904A21F74F182644D /* TouchInputHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B6BFFD65E5354FEE690DB098 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_NAME = ProcreateClone;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C71750AC2273CA00173089B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wiamokok.procreate-clone";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E4183003EE0724288E07FC68 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.wiamokok.procreate-clone";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EC3F171CD8B63E6E46229B37 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_NAME = ProcreateClone;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D23F7B7624F250D1FDAB8E07 /* Build configuration list for PBXProject "ProcreateClone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E4183003EE0724288E07FC68 /* Debug */,
+				C71750AC2273CA00173089B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E954A62E95300A4FE789254B /* Build configuration list for PBXNativeTarget "ProcreateClone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC3F171CD8B63E6E46229B37 /* Debug */,
+				B6BFFD65E5354FEE690DB098 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 686DFDF0ED66A634F7405753 /* Project object */;
+}

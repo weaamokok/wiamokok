@@ -1,0 +1,1021 @@
+import MetalKit
+import UIKit
+
+/// GPU-accelerated drawing surface with multi-layer compositing.
+///
+/// Render loop each frame:
+///   1. Clear composite texture to white.
+///   2. For each visible layer (bottom → top): blit layer texture onto composite (alpha-blended, opacity applied).
+///      If this is the active layer, draw the in-progress stroke stamps on top before moving on.
+///   3. Blit composite to the drawable.
+final class MetalCanvasView: MTKView {
+
+    // MARK: - Metal objects
+
+    private var commandQueue: MTLCommandQueue!
+    private var blitPipeline:       MTLRenderPipelineState!
+    private var stampPipeline:      MTLRenderPipelineState!
+    private var erasePipeline:      MTLRenderPipelineState!
+    private var smudgePipeline:     MTLRenderPipelineState!
+    private var selExtractPipeline: MTLRenderPipelineState!  // lasso extract
+    private var selClearPipeline:   MTLRenderPipelineState!  // lasso clear
+    private var blendModePipeline:  MTLRenderPipelineState!  // custom blend modes
+    // Scratch texture reused for blend-mode background snapshots
+    private var blendScratchTexture: MTLTexture?
+
+    private var compositeTexture: MTLTexture?
+    private var smudgePickupTexture: MTLTexture?
+
+    // MARK: - App objects
+
+    private(set) var layerStack: LayerStack!
+    private(set) var history: HistoryManager!
+    private var brushEngine: BrushEngine!
+    private var inputHandler: TouchInputHandler!
+    private(set) var selectionState = SelectionState()
+
+    // MARK: - Lasso input state
+
+    private var lassoPoints: [CGPoint] = []
+    private let lassoShapeLayer = CAShapeLayer()
+
+    // MARK: - Dirty tracking
+
+    /// Set to true whenever something visible changes; cleared after each drawn frame.
+    private var isDirty = true
+    /// Predicted stamps rendered speculatively — discarded at the next real update.
+    private var predictedStamps: [BrushStamp] = []
+
+    // MARK: - Canvas viewport (zoom + pan)
+
+    /// Display zoom: 1.0 = canvas fills view exactly, range 0.1 … 32.
+    private(set) var canvasZoom: CGFloat = 1.0
+    /// Canvas origin in view-point space (top-left corner of the canvas rect).
+    private(set) var canvasOffset: CGPoint = .zero
+    /// Fired whenever zoom changes so the toolbar HUD can update.
+    var onZoomChanged: ((CGFloat) -> Void)?
+
+    /// Fired once after the canvas first gets a valid size (width, height in pixels).
+    var onCanvasSized: ((Int, Int) -> Void)?
+    private var hasFiredSized = false
+    /// Fired after each stroke is committed to a layer texture.
+    var onStrokeCommitted: (() -> Void)?
+    /// Fired when the eyedropper samples a new color; passes the sampled UIColor.
+    var onColorSampled: ((UIColor) -> Void)?
+
+    // MARK: - Eyedropper loupe
+
+    private var colorLoupeView: ColorLoupeView?
+
+    // MARK: - Init
+
+    override init(frame: CGRect, device: MTLDevice?) {
+        let gpu = device ?? MTLCreateSystemDefaultDevice()!
+        super.init(frame: frame, device: gpu)
+        configure(gpu: gpu)
+    }
+
+    required init(coder: NSCoder) {
+        let gpu = MTLCreateSystemDefaultDevice()!
+        super.init(coder: coder)
+        configure(gpu: gpu)
+    }
+
+    private func configure(gpu: MTLDevice) {
+        self.device             = gpu
+        self.colorPixelFormat   = .bgra8Unorm
+        self.clearColor         = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
+        self.enableSetNeedsDisplay = false
+        self.isPaused           = false
+        self.preferredFramesPerSecond = 60
+        self.isMultipleTouchEnabled   = true
+
+        commandQueue = gpu.makeCommandQueue()!
+        buildPipelines(gpu: gpu)
+
+        layerStack  = LayerStack(device: gpu)
+        history     = HistoryManager(device: gpu, commandQueue: commandQueue)
+        brushEngine = BrushEngine(device: gpu)
+
+        inputHandler = TouchInputHandler()
+        inputHandler.coordinateTransform = { [weak self] pt in self?.canvasPoint(from: pt) ?? pt }
+        inputHandler.onStrokeBegin  = { [weak self] in self?.handleStrokeBegin() }
+        inputHandler.onStrokeUpdate = { [weak self] pts in
+            self?.predictedStamps = []          // discard previous prediction
+            self?.brushEngine.addPoints(pts)
+            self?.isDirty = true
+        }
+        inputHandler.onStrokePredicted = { [weak self] pts in
+            guard let self else { return }
+            // Speculatively generate stamps for predicted points but keep them separate
+            self.predictedStamps = self.brushEngine.previewStamps(for: pts)
+            self.isDirty = true
+        }
+        inputHandler.onStrokeEnd    = { [weak self] in
+            self?.predictedStamps = []
+            self?.commitCurrentStroke()
+        }
+
+        setupLassoLayer()
+    }
+
+    // MARK: - Pipelines
+
+    private func buildPipelines(gpu: MTLDevice) {
+        guard let lib = gpu.makeDefaultLibrary() else {
+            fatalError("Metal default library not found.")
+        }
+
+        // Blit pipeline — alpha-blended so layers composite correctly
+        let blitDesc = MTLRenderPipelineDescriptor()
+        blitDesc.vertexFunction   = lib.makeFunction(name: "blitVertexShader")
+        blitDesc.fragmentFunction = lib.makeFunction(name: "blitFragmentShader")
+        blitDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        blitDesc.colorAttachments[0].isBlendingEnabled = true
+        blitDesc.colorAttachments[0].sourceRGBBlendFactor        = .sourceAlpha
+        blitDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        blitDesc.colorAttachments[0].sourceAlphaBlendFactor      = .sourceAlpha
+        blitDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        blitPipeline = try! gpu.makeRenderPipelineState(descriptor: blitDesc)
+
+        // Stamp pipeline — pre-multiplied alpha
+        let stampDesc = MTLRenderPipelineDescriptor()
+        stampDesc.vertexFunction   = lib.makeFunction(name: "stampVertexShader")
+        stampDesc.fragmentFunction = lib.makeFunction(name: "stampFragmentShader")
+        stampDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        stampDesc.colorAttachments[0].isBlendingEnabled = true
+        stampDesc.colorAttachments[0].sourceRGBBlendFactor        = .one
+        stampDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        stampDesc.colorAttachments[0].sourceAlphaBlendFactor      = .one
+        stampDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        stampPipeline = try! gpu.makeRenderPipelineState(descriptor: stampDesc)
+
+        // Erase pipeline — cuts alpha from destination
+        let eraseDesc = MTLRenderPipelineDescriptor()
+        eraseDesc.vertexFunction   = lib.makeFunction(name: "stampVertexShader")
+        eraseDesc.fragmentFunction = lib.makeFunction(name: "eraseFragmentShader")
+        eraseDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        eraseDesc.colorAttachments[0].isBlendingEnabled = true
+        eraseDesc.colorAttachments[0].sourceRGBBlendFactor        = .zero
+        eraseDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        eraseDesc.colorAttachments[0].sourceAlphaBlendFactor      = .zero
+        eraseDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        erasePipeline = try! gpu.makeRenderPipelineState(descriptor: eraseDesc)
+
+        // Smudge pipeline — pre-multiplied alpha (same blend, different fragment)
+        let smudgeDesc = MTLRenderPipelineDescriptor()
+        smudgeDesc.vertexFunction   = lib.makeFunction(name: "stampVertexShader")
+        smudgeDesc.fragmentFunction = lib.makeFunction(name: "smudgeFragmentShader")
+        smudgeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        smudgeDesc.colorAttachments[0].isBlendingEnabled = true
+        smudgeDesc.colorAttachments[0].sourceRGBBlendFactor        = .one
+        smudgeDesc.colorAttachments[0].destinationRGBBlendFactor   = .oneMinusSourceAlpha
+        smudgeDesc.colorAttachments[0].sourceAlphaBlendFactor      = .one
+        smudgeDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        smudgePipeline = try! gpu.makeRenderPipelineState(descriptor: smudgeDesc)
+
+        // Selection extract — direct write (no blending)
+        let selExtDesc = MTLRenderPipelineDescriptor()
+        selExtDesc.vertexFunction   = lib.makeFunction(name: "blitVertexShader")
+        selExtDesc.fragmentFunction = lib.makeFunction(name: "selectionExtractFragmentShader")
+        selExtDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        selExtDesc.colorAttachments[0].isBlendingEnabled = false
+        selExtractPipeline = try! gpu.makeRenderPipelineState(descriptor: selExtDesc)
+
+        // Selection clear — direct write (no blending)
+        let selClrDesc = MTLRenderPipelineDescriptor()
+        selClrDesc.vertexFunction   = lib.makeFunction(name: "blitVertexShader")
+        selClrDesc.fragmentFunction = lib.makeFunction(name: "selectionClearFragmentShader")
+        selClrDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        selClrDesc.colorAttachments[0].isBlendingEnabled = false
+        selClearPipeline = try! gpu.makeRenderPipelineState(descriptor: selClrDesc)
+
+        // Blend mode pipeline — reads background + layer, outputs blended result (no fixed-function blend)
+        let blendDesc = MTLRenderPipelineDescriptor()
+        blendDesc.vertexFunction   = lib.makeFunction(name: "blitVertexShader")
+        blendDesc.fragmentFunction = lib.makeFunction(name: "blendFragmentShader")
+        blendDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        blendDesc.colorAttachments[0].isBlendingEnabled = false
+        blendModePipeline = try! gpu.makeRenderPipelineState(descriptor: blendDesc)
+    }
+
+    // MARK: - Layout / texture init
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let w = Int(bounds.width  * contentScaleFactor)
+        let h = Int(bounds.height * contentScaleFactor)
+        guard compositeTexture == nil || compositeTexture!.width != w else { return }
+
+        compositeTexture    = makePrivateTexture(width: w, height: h)
+        blendScratchTexture = makePrivateTexture(width: w, height: h)
+        Task { @MainActor in
+            layerStack.setCanvasSize(width: w, height: h)
+            if !self.hasFiredSized {
+                self.hasFiredSized = true
+                self.onCanvasSized?(w, h)
+            }
+        }
+    }
+
+    private func makePrivateTexture(width: Int, height: Int) -> MTLTexture {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+        )
+        desc.usage = [.renderTarget, .shaderRead]
+        desc.storageMode = .private
+        return device!.makeTexture(descriptor: desc)!
+    }
+
+    // MARK: - Render loop
+
+    override func draw(_ rect: CGRect) {
+        guard isDirty else { return }
+        isDirty = false
+        guard
+            let composite = compositeTexture,
+            let drawable  = currentDrawable,
+            let cmdBuf    = commandQueue.makeCommandBuffer()
+        else { return }
+
+        let layers   = layerStack.layers
+        let activeI  = layerStack.activeIndex
+        // Combine committed + speculative predicted stamps for this frame
+        let stamps   = brushEngine.currentStrokeStamps + predictedStamps
+        let activeTool = brushEngine.activeTool
+        let dSize    = CGSize(width: self.drawableSize.width, height: self.drawableSize.height)
+        let scale    = Float(contentScaleFactor)
+
+        // ── Pass 1: Composite all layers into compositeTexture ───────────────
+        let compPass = MTLRenderPassDescriptor()
+        compPass.colorAttachments[0].texture     = composite
+        compPass.colorAttachments[0].loadAction  = .clear
+        compPass.colorAttachments[0].storeAction = .store
+        compPass.colorAttachments[0].clearColor  = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
+
+        // Helper to draw in-progress stamps into an open encoder
+        func encodeStamps(_ enc: MTLRenderCommandEncoder, activeIndex: Int, layerIndex: Int) {
+            guard layerIndex == activeIndex, !stamps.isEmpty else { return }
+            let pipeline: MTLRenderPipelineState
+            switch activeTool {
+            case .eraser: pipeline = erasePipeline
+            case .smudge: pipeline = smudgePipeline
+            default:      pipeline = stampPipeline
+            }
+            enc.setRenderPipelineState(pipeline)
+            if activeTool == .smudge, let pickup = smudgePickupTexture {
+                enc.setFragmentTexture(pickup, index: 0)
+            }
+            for stamp in stamps {
+                var u = stamp.uniforms(drawableSize: dSize, scale: scale)
+                enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                enc.setFragmentBytes(&u, length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            }
+        }
+
+        // Normal-mode layers accumulate in one open encoder; non-Normal flush it first.
+        var openEncoder: MTLRenderCommandEncoder? = cmdBuf.makeRenderCommandEncoder(descriptor: compPass)
+        var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
+
+        for (i, layer) in layers.enumerated() {
+            guard layer.isVisible else { continue }
+
+            if layer.blendMode == .normal {
+                // Fast path: use Metal's fixed-function src-alpha blend
+                let enc = openEncoder ?? {
+                    let p = MTLRenderPassDescriptor()
+                    p.colorAttachments[0].texture     = composite
+                    p.colorAttachments[0].loadAction  = .load
+                    p.colorAttachments[0].storeAction = .store
+                    let e = cmdBuf.makeRenderCommandEncoder(descriptor: p)!
+                    openEncoder = e
+                    return e
+                }()
+                enc.setRenderPipelineState(blitPipeline)
+                enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+                enc.setFragmentTexture(layer.texture, index: 0)
+                var opacity = layer.opacity
+                enc.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 1)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                encodeStamps(enc, activeIndex: activeI, layerIndex: i)
+            } else {
+                // Custom blend: flush open encoder, copy composite → scratch, run blend pass
+                openEncoder?.endEncoding()
+                openEncoder = nil
+
+                // Copy composite into scratch so the blend shader can read it
+                if let scratch = blendScratchTexture,
+                   let blitCmd = cmdBuf.makeBlitCommandEncoder() {
+                    blitCmd.copy(from: composite, to: scratch)
+                    blitCmd.endEncoding()
+                }
+
+                let blendPass = MTLRenderPassDescriptor()
+                blendPass.colorAttachments[0].texture     = composite
+                blendPass.colorAttachments[0].loadAction  = .load
+                blendPass.colorAttachments[0].storeAction = .store
+                if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: blendPass),
+                   let scratch = blendScratchTexture {
+                    enc.setRenderPipelineState(blendModePipeline)
+                    enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+                    enc.setFragmentTexture(scratch,       index: 0)
+                    enc.setFragmentTexture(layer.texture, index: 1)
+                    var opacity = layer.opacity
+                    enc.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 1)
+                    var mode = layer.blendMode.rawValue
+                    enc.setFragmentBytes(&mode, length: MemoryLayout<UInt32>.stride, index: 2)
+                    enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                    encodeStamps(enc, activeIndex: activeI, layerIndex: i)
+                    enc.endEncoding()
+                }
+            }
+        }
+        openEncoder?.endEncoding()
+
+        // ── Pass 2b: Blit floating selection content onto composite ─────────
+        if selectionState.isActive, let content = selectionState.contentTexture {
+            let selPass = MTLRenderPassDescriptor()
+            selPass.colorAttachments[0].texture     = composite
+            selPass.colorAttachments[0].loadAction  = .load
+            selPass.colorAttachments[0].storeAction = .store
+
+            if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: selPass) {
+                enc.setRenderPipelineState(blitPipeline)
+                var selQuad = selectionQuadNDC(viewSize: CGSize(width: drawableSize.width, height: drawableSize.height))
+                enc.setVertexBytes(&selQuad, length: selQuad.count * MemoryLayout<Float>.stride, index: 0)
+                enc.setFragmentTexture(content, index: 0)
+                var opacity: Float = 1.0
+                enc.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 1)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                enc.endEncoding()
+            }
+        }
+
+        // ── Pass 3: Blit compositeTexture to the drawable (zoom + pan applied) ─
+        guard let passDesc = currentRenderPassDescriptor,
+              let finalEnc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc)
+        else {
+            cmdBuf.commit()
+            return
+        }
+
+        finalEnc.setRenderPipelineState(blitPipeline)
+        var displayQuad = canvasDisplayQuad()
+        finalEnc.setVertexBytes(&displayQuad, length: displayQuad.count * MemoryLayout<Float>.stride, index: 0)
+        finalEnc.setFragmentTexture(composite, index: 0)
+        var fullOpacity: Float = 1.0
+        finalEnc.setFragmentBytes(&fullOpacity, length: MemoryLayout<Float>.stride, index: 1)
+        finalEnc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        finalEnc.endEncoding()
+
+        cmdBuf.present(drawable)
+        cmdBuf.commit()
+    }
+
+    // MARK: - Stroke begin / commit
+
+    private func handleStrokeBegin() {
+        // For smudge: snapshot the active layer so the shader can sample it
+        guard brushEngine.activeTool == .smudge,
+              let layer = layerStack.activeLayer else {
+            smudgePickupTexture = nil
+            return
+        }
+        smudgePickupTexture = copyTexture(layer.texture)
+    }
+
+    private func commitCurrentStroke() {
+        let stamps = brushEngine.currentStrokeStamps
+        guard !stamps.isEmpty, let layer = layerStack.activeLayer else {
+            brushEngine.clearCurrentStroke()
+            smudgePickupTexture = nil
+            return
+        }
+
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: layer.texture)
+
+        guard let cmdBuf = commandQueue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = layer.texture
+        pass.colorAttachments[0].loadAction  = .load
+        pass.colorAttachments[0].storeAction = .store
+
+        let activeTool = brushEngine.activeTool
+        let pipeline: MTLRenderPipelineState
+        switch activeTool {
+        case .eraser: pipeline = erasePipeline
+        case .smudge: pipeline = smudgePipeline
+        default:      pipeline = stampPipeline
+        }
+
+        if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: pass) {
+            enc.setRenderPipelineState(pipeline)
+            if activeTool == .smudge, let pickup = smudgePickupTexture {
+                enc.setFragmentTexture(pickup, index: 0)
+            }
+            let dSize = CGSize(width: layer.texture.width, height: layer.texture.height)
+            for stamp in stamps {
+                var u = stamp.uniforms(drawableSize: dSize, scale: 1.0)
+                enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                enc.setFragmentBytes(&u, length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            }
+            enc.endEncoding()
+        }
+        cmdBuf.commit()
+        cmdBuf.waitUntilCompleted()
+
+        brushEngine.clearCurrentStroke()
+        smudgePickupTexture = nil
+        onStrokeCommitted?()
+    }
+
+    private func copyTexture(_ src: MTLTexture) -> MTLTexture? {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: src.pixelFormat, width: src.width, height: src.height, mipmapped: false
+        )
+        desc.usage = [.renderTarget, .shaderRead]
+        desc.storageMode = .private
+        guard let dst = device!.makeTexture(descriptor: desc),
+              let cmd = commandQueue.makeCommandBuffer(),
+              let enc = cmd.makeBlitCommandEncoder()
+        else { return nil }
+        enc.copy(from: src, to: dst)
+        enc.endEncoding()
+        cmd.commit()
+        return dst
+    }
+
+    // MARK: - Public API
+
+    func setBrushColor(_ color: UIColor)    { brushEngine.brushColor   = color   }
+    func setBrushSize(_ size: Float)        { brushEngine.brushSize    = size    }
+    func setBrushOpacity(_ opacity: Float)  { brushEngine.brushOpacity = opacity }
+    func setActiveTool(_ tool: DrawingTool)     { brushEngine.activeTool   = tool    }
+    func setActivePreset(_ p: BrushPreset)      { brushEngine.activePreset = p       }
+    func setSoftness(_ s: Float)                { brushEngine.softness     = s       }
+    func setSpacing(_ s: Float)                 { brushEngine.spacing      = s       }
+
+    // MARK: - Canvas viewport API
+
+    func applyZoom(scale: CGFloat, anchor: CGPoint) {
+        let newZoom = (canvasZoom * scale).clamped(to: 0.1...32)
+        let clampedScale = newZoom / canvasZoom
+        canvasOffset = CGPoint(
+            x: anchor.x - (anchor.x - canvasOffset.x) * clampedScale,
+            y: anchor.y - (anchor.y - canvasOffset.y) * clampedScale
+        )
+        canvasZoom = newZoom
+        isDirty = true
+        onZoomChanged?(canvasZoom)
+    }
+
+    func applyPan(delta: CGPoint) {
+        canvasOffset.x += delta.x
+        canvasOffset.y += delta.y
+        isDirty = true
+    }
+
+    func resetZoom() {
+        canvasZoom   = 1.0
+        canvasOffset = .zero
+        isDirty = true
+        onZoomChanged?(canvasZoom)
+    }
+
+    // MARK: - Canvas viewport helpers
+
+    /// Maps a view-space point to canvas-pixel coordinates.
+    func canvasPoint(from viewPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (viewPoint.x - canvasOffset.x) / canvasZoom,
+            y: (viewPoint.y - canvasOffset.y) / canvasZoom
+        )
+    }
+
+    /// Full NDC quad (TL,TR,BL,BR) placing the canvas texture in the drawable at current zoom+pan.
+    private func canvasDisplayQuad() -> [Float] {
+        let vw = Float(bounds.width)
+        let vh = Float(bounds.height)
+        let ox = Float(canvasOffset.x)
+        let oy = Float(canvasOffset.y)
+        let cw = vw * Float(canvasZoom)
+        let ch = vh * Float(canvasZoom)
+        func ndcX(_ x: Float) -> Float { (x / vw) * 2 - 1 }
+        func ndcY(_ y: Float) -> Float { 1 - (y / vh) * 2 }
+        return [
+            ndcX(ox),    ndcY(oy),    0, 0,
+            ndcX(ox+cw), ndcY(oy),    1, 0,
+            ndcX(ox),    ndcY(oy+ch), 0, 1,
+            ndcX(ox+cw), ndcY(oy+ch), 1, 1,
+        ]
+    }
+
+    /// Renders a flat composite of all visible layers and returns it as a UIImage.
+    func renderCompositeImage() -> UIImage? {
+        guard let composite = compositeTexture else { return nil }
+
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: composite.width, height: composite.height, mipmapped: false)
+        desc.storageMode = .shared
+        desc.usage = [.shaderRead]
+        guard let shared = device!.makeTexture(descriptor: desc),
+              let cmd  = commandQueue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder()
+        else { return nil }
+        blit.copy(from: composite, to: shared)
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        let w = composite.width, h = composite.height
+        let bpr = w * 4
+        var bytes = [UInt8](repeating: 0, count: h * bpr)
+        shared.getBytes(&bytes, bytesPerRow: bpr,
+                        from: MTLRegion(origin: .init(x: 0, y: 0, z: 0),
+                                        size: .init(width: w, height: h, depth: 1)),
+                        mipmapLevel: 0)
+        guard let ctx = CGContext(
+            data: &bytes, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: bpr,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ), let cgImg = ctx.makeImage() else { return nil }
+        return UIImage(cgImage: cgImg, scale: contentScaleFactor, orientation: .up)
+    }
+
+    func undo() {
+        brushEngine.clearCurrentStroke()
+        history.undo(layers: layerStack.layers)
+        isDirty = true
+    }
+
+    func redo() {
+        brushEngine.clearCurrentStroke()
+        history.redo(layers: layerStack.layers)
+        isDirty = true
+    }
+
+    func clearCanvas() {
+        guard let layer = layerStack.activeLayer else { return }
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: layer.texture)
+        clearLayerTexture(layer.texture, isBackground: layerStack.activeIndex == 0)
+        isDirty = true
+        brushEngine.clearCurrentStroke()
+    }
+
+    private func clearLayerTexture(_ tex: MTLTexture, isBackground: Bool) {
+        guard let cmd  = commandQueue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = tex
+        pass.colorAttachments[0].loadAction  = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor  = isBackground
+            ? MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
+            : MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cmd.commit()
+    }
+
+    // MARK: - Lasso layer setup
+
+    private func setupLassoLayer() {
+        lassoShapeLayer.strokeColor = UIColor.white.cgColor
+        lassoShapeLayer.fillColor   = UIColor(white: 1, alpha: 0.08).cgColor
+        lassoShapeLayer.lineWidth   = 1.5
+        lassoShapeLayer.lineDashPattern = [6, 4]
+        lassoShapeLayer.isHidden    = true
+        layer.addSublayer(lassoShapeLayer)
+    }
+
+    private func updateLassoCAPath() {
+        guard lassoPoints.count > 1 else { return }
+        // lassoPoints are in canvas space; convert back to view space for the CAShapeLayer overlay
+        let p = UIBezierPath()
+        let first = viewPoint(from: lassoPoints[0])
+        p.move(to: first)
+        lassoPoints.dropFirst().forEach { p.addLine(to: viewPoint(from: $0)) }
+        lassoShapeLayer.path = p.cgPath
+    }
+
+    /// Maps a canvas-space point back to view-space for overlay drawing.
+    private func viewPoint(from canvasPt: CGPoint) -> CGPoint {
+        CGPoint(
+            x: canvasPt.x * canvasZoom + canvasOffset.x,
+            y: canvasPt.y * canvasZoom + canvasOffset.y
+        )
+    }
+
+    // MARK: - Touch forwarding
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = touches.first else { return }
+        switch brushEngine.activeTool {
+        case .lasso:
+            lassoPoints = [canvasPoint(from: t.preciseLocation(in: self))]
+            lassoShapeLayer.isHidden = false
+            updateLassoCAPath()
+        case .eyedropper:
+            let pt = t.preciseLocation(in: self)
+            if let color = sampleCompositeColor(at: pt) {
+                onColorSampled?(color)
+                showColorLoupe(color: color, at: pt)
+            }
+        case .fill:
+            break
+        default:
+            inputHandler.touchesBegan(touches, with: event, in: self)
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = touches.first else { return }
+        switch brushEngine.activeTool {
+        case .lasso:
+            let all = event?.coalescedTouches(for: t) ?? [t]
+            all.forEach { lassoPoints.append(canvasPoint(from: $0.preciseLocation(in: self))) }
+            updateLassoCAPath()
+        case .eyedropper:
+            let pt = t.preciseLocation(in: self)
+            if let color = sampleCompositeColor(at: pt) {
+                onColorSampled?(color)
+                updateColorLoupe(color: color, at: pt)
+            }
+        case .fill:
+            break
+        default:
+            inputHandler.touchesMoved(touches, with: event, in: self)
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = touches.first else { return }
+        switch brushEngine.activeTool {
+        case .lasso:
+            lassoShapeLayer.isHidden = true
+            if lassoPoints.count > 4 { beginSelection() }
+            lassoPoints = []
+        case .eyedropper:
+            hideColorLoupe()
+        case .fill:
+            fillActiveLayer(at: t.preciseLocation(in: self), color: brushEngine.brushColor)
+        default:
+            inputHandler.touchesEnded(touches, with: event, in: self)
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        switch brushEngine.activeTool {
+        case .lasso:
+            lassoShapeLayer.isHidden = true
+            lassoPoints = []
+        case .eyedropper:
+            hideColorLoupe()
+        case .fill:
+            break
+        default:
+            inputHandler.touchesEnded(touches, with: event, in: self)
+        }
+    }
+
+    // MARK: - Selection operations
+
+    private func beginSelection() {
+        guard let activeLayer = layerStack.activeLayer, lassoPoints.count > 4 else { return }
+        let texW = activeLayer.texture.width
+        let texH = activeLayer.texture.height
+        let scale = contentScaleFactor
+
+        // Build closed path in VIEW POINTS
+        let path = UIBezierPath()
+        path.move(to: lassoPoints[0])
+        lassoPoints.dropFirst().forEach { path.addLine(to: $0) }
+        path.close()
+
+        let ptBounds = path.bounds
+        guard ptBounds.width > 2, ptBounds.height > 2 else { return }
+
+        // Rasterize mask to CPU buffer in PIXEL coordinates
+        guard var maskBytes = rasterizeMask(path: path.cgPath,
+                                            scale: scale,
+                                            width: texW, height: texH)
+        else { return }
+
+        // Upload mask as R8 texture
+        let maskDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm, width: texW, height: texH, mipmapped: false)
+        maskDesc.storageMode = .shared
+        maskDesc.usage = [.shaderRead]
+        guard let maskTex = device!.makeTexture(descriptor: maskDesc) else { return }
+        maskTex.replace(region: MTLRegionMake2D(0, 0, texW, texH),
+                        mipmapLevel: 0, withBytes: &maskBytes, bytesPerRow: texW)
+
+        // Create content texture
+        let contentDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: texW, height: texH, mipmapped: false)
+        contentDesc.usage = [.renderTarget, .shaderRead]
+        contentDesc.storageMode = .private
+        guard let contentTex = device!.makeTexture(descriptor: contentDesc) else { return }
+
+        // Snapshot layer before cut (for cancel)
+        let snapshot = copyTexture(activeLayer.texture)
+
+        runExtractionPass(src: activeLayer.texture, mask: maskTex, dst: contentTex)
+        let isBackground = layerStack.activeIndex == 0
+        runClearPass(dst: activeLayer.texture, mask: maskTex, isBackground: isBackground)
+
+        Task { @MainActor in
+            self.selectionState.contentTexture = contentTex
+            self.selectionState.originalBounds = ptBounds
+            self.selectionState.transform      = .identity
+            self.selectionState.preCutSnapshot = snapshot
+            self.selectionState.isActive       = true
+        }
+    }
+
+    private func rasterizeMask(path: CGPath, scale: CGFloat, width: Int, height: Int) -> [UInt8]? {
+        var bytes = [UInt8](repeating: 0, count: width * height)
+        guard let ctx = CGContext(
+            data: &bytes, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.addPath(path)
+        ctx.setFillColor(UIColor.white.cgColor)
+        ctx.fillPath()
+        return bytes
+    }
+
+    private func runExtractionPass(src: MTLTexture, mask: MTLTexture, dst: MTLTexture) {
+        guard let cmd = commandQueue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = dst
+        pass.colorAttachments[0].loadAction  = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor  = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        if let enc = cmd.makeRenderCommandEncoder(descriptor: pass) {
+            enc.setRenderPipelineState(selExtractPipeline)
+            var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
+            enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+            enc.setFragmentTexture(src,  index: 0)
+            enc.setFragmentTexture(mask, index: 1)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            enc.endEncoding()
+        }
+        cmd.commit(); cmd.waitUntilCompleted()
+    }
+
+    private func runClearPass(dst: MTLTexture, mask: MTLTexture, isBackground: Bool) {
+        guard let cmd = commandQueue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = dst
+        pass.colorAttachments[0].loadAction  = .load
+        pass.colorAttachments[0].storeAction = .store
+        if let enc = cmd.makeRenderCommandEncoder(descriptor: pass) {
+            enc.setRenderPipelineState(selClearPipeline)
+            var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
+            enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+            enc.setFragmentTexture(mask, index: 0)
+            var fill: SIMD4<Float> = isBackground
+                ? SIMD4(1, 1, 1, 1)
+                : SIMD4(0, 0, 0, 0)
+            enc.setFragmentBytes(&fill, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            enc.endEncoding()
+        }
+        cmd.commit(); cmd.waitUntilCompleted()
+    }
+
+    func commitSelection() {
+        guard selectionState.isActive,
+              let content    = selectionState.contentTexture,
+              let activeLayer = layerStack.activeLayer
+        else { return }
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: activeLayer.texture)
+        // Blit content at transformed quad onto active layer
+        guard let cmd = commandQueue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture     = activeLayer.texture
+        pass.colorAttachments[0].loadAction  = .load
+        pass.colorAttachments[0].storeAction = .store
+        if let enc = cmd.makeRenderCommandEncoder(descriptor: pass) {
+            enc.setRenderPipelineState(blitPipeline)
+            let texSize = CGSize(width: activeLayer.texture.width, height: activeLayer.texture.height)
+            var q = selectionQuadNDC(viewSize: texSize, useContentScaleFactor: false)
+            enc.setVertexBytes(&q, length: q.count * MemoryLayout<Float>.stride, index: 0)
+            enc.setFragmentTexture(content, index: 0)
+            var op: Float = 1
+            enc.setFragmentBytes(&op, length: MemoryLayout<Float>.stride, index: 1)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            enc.endEncoding()
+        }
+        cmd.commit(); cmd.waitUntilCompleted()
+        selectionState.reset()
+        isDirty = true
+    }
+
+    func cancelSelection() {
+        guard selectionState.isActive else { return }
+        // Restore layer from pre-cut snapshot
+        if let snap = selectionState.preCutSnapshot, let layer = layerStack.activeLayer {
+            blit(src: snap, dst: layer.texture)
+        }
+        selectionState.reset()
+        isDirty = true
+    }
+
+    private func blit(src: MTLTexture, dst: MTLTexture) {
+        guard let cmd  = commandQueue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder()
+        else { return }
+        blit.copy(from: src, to: dst)
+        blit.endEncoding()
+        cmd.commit()
+    }
+
+    /// Build NDC quad (TL, TR, BL, BR) for the selection at its current transform.
+    private func selectionQuadNDC(viewSize: CGSize, useContentScaleFactor: Bool = true) -> [Float] {
+        let scale = useContentScaleFactor ? contentScaleFactor : 1
+        let b = selectionState.originalBounds
+        let t = selectionState.transform
+        let corners: [(CGPoint, CGPoint)] = [
+            (CGPoint(x: b.minX, y: b.minY).applying(t), CGPoint(x: 0, y: 0)),
+            (CGPoint(x: b.maxX, y: b.minY).applying(t), CGPoint(x: 1, y: 0)),
+            (CGPoint(x: b.minX, y: b.maxY).applying(t), CGPoint(x: 0, y: 1)),
+            (CGPoint(x: b.maxX, y: b.maxY).applying(t), CGPoint(x: 1, y: 1)),
+        ]
+        return corners.flatMap { (world, uv) -> [Float] in
+            let ndcX = Float(world.x * scale / viewSize.width)  * 2 - 1
+            let ndcY = 1 - Float(world.y * scale / viewSize.height) * 2
+            return [ndcX, ndcY, Float(uv.x), Float(uv.y)]
+        }
+    }
+
+    // MARK: - Eyedropper
+
+    /// Samples the composite texture at `viewPoint` and returns the color.
+    func sampleCompositeColor(at viewPoint: CGPoint) -> UIColor? {
+        guard let composite = compositeTexture else { return nil }
+        let cp = canvasPoint(from: viewPoint)
+        let px = Int(cp.x * contentScaleFactor)
+        let py = Int(cp.y * contentScaleFactor)
+        guard px >= 0, px < composite.width, py >= 0, py < composite.height else { return nil }
+
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: 1, height: 1, mipmapped: false)
+        desc.storageMode = .shared
+        desc.usage = [.shaderRead]
+        guard let shared = device!.makeTexture(descriptor: desc),
+              let cmd  = commandQueue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder()
+        else { return nil }
+
+        blit.copy(from: composite, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: px, y: py, z: 0),
+                  sourceSize:   MTLSize(width: 1, height: 1, depth: 1),
+                  to: shared, destinationSlice: 0, destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        var bgra = [UInt8](repeating: 0, count: 4)
+        shared.getBytes(&bgra, bytesPerRow: 4, from: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0)
+        // BGRA layout: index 0=B, 1=G, 2=R, 3=A
+        return UIColor(
+            red:   CGFloat(bgra[2]) / 255,
+            green: CGFloat(bgra[1]) / 255,
+            blue:  CGFloat(bgra[0]) / 255,
+            alpha: CGFloat(bgra[3]) / 255
+        )
+    }
+
+    // MARK: - Fill
+
+    /// Flood-fills the active layer from `viewPoint` with `color`.
+    /// Uses tolerance-based BFS comparing each channel; connected pixels within
+    /// `tolerance` (per channel, 0–255) of the seed pixel are filled.
+    func fillActiveLayer(at viewPoint: CGPoint, color: UIColor, tolerance: Int = 30) {
+        guard let layer = layerStack.activeLayer else { return }
+        let tex = layer.texture
+        let w = tex.width, h = tex.height
+        let cp = canvasPoint(from: viewPoint)
+        let px = Int(cp.x * contentScaleFactor)
+        let py = Int(cp.y * contentScaleFactor)
+        guard px >= 0, px < w, py >= 0, py < h else { return }
+
+        // Download private texture via a shared copy
+        let sharedDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        sharedDesc.storageMode = .shared
+        sharedDesc.usage = [.shaderRead]
+        guard let shared = device!.makeTexture(descriptor: sharedDesc),
+              let dl = commandQueue.makeCommandBuffer(),
+              let dlBlit = dl.makeBlitCommandEncoder()
+        else { return }
+        dlBlit.copy(from: tex, to: shared)
+        dlBlit.endEncoding()
+        dl.commit(); dl.waitUntilCompleted()
+
+        let bpr = w * 4
+        var pixels = [UInt8](repeating: 0, count: h * bpr)
+        shared.getBytes(&pixels, bytesPerRow: bpr,
+                        from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+
+        // Extract fill color in BGRA order
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let fillB = UInt8(b * 255), fillG = UInt8(g * 255)
+        let fillR = UInt8(r * 255), fillA = UInt8(a * 255)
+
+        let startIdx = py * bpr + px * 4
+        let tgtB = pixels[startIdx], tgtG = pixels[startIdx+1]
+        let tgtR = pixels[startIdx+2], tgtA = pixels[startIdx+3]
+
+        // Nothing to do if seed already matches fill color
+        if tgtB == fillB && tgtG == fillG && tgtR == fillR && tgtA == fillA { return }
+
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: tex)
+
+        // BFS with efficient array-based queue (head pointer avoids O(n) removeFirst)
+        var visited = [Bool](repeating: false, count: w * h)
+        var queue   = [(x: Int, y: Int)]()
+        queue.reserveCapacity(min(w * h / 4, 262144))
+        queue.append((px, py))
+        var head = 0
+
+        while head < queue.count {
+            let (cx, cy) = queue[head]; head += 1
+            let vi = cy * w + cx
+            guard !visited[vi] else { continue }
+            visited[vi] = true
+
+            let idx = cy * bpr + cx * 4
+            let db = abs(Int(pixels[idx])   - Int(tgtB))
+            let dg = abs(Int(pixels[idx+1]) - Int(tgtG))
+            let dr = abs(Int(pixels[idx+2]) - Int(tgtR))
+            let da = abs(Int(pixels[idx+3]) - Int(tgtA))
+            guard db + dg + dr + da <= tolerance * 4 else { continue }
+
+            pixels[idx]   = fillB
+            pixels[idx+1] = fillG
+            pixels[idx+2] = fillR
+            pixels[idx+3] = fillA
+
+            if cx > 0   { queue.append((cx-1, cy)) }
+            if cx < w-1 { queue.append((cx+1, cy)) }
+            if cy > 0   { queue.append((cx, cy-1)) }
+            if cy < h-1 { queue.append((cx, cy+1)) }
+        }
+
+        // Upload back: write into shared texture then copy to private
+        let uploadDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        uploadDesc.storageMode = .shared
+        uploadDesc.usage = [.shaderRead]
+        guard let upload = device!.makeTexture(descriptor: uploadDesc) else { return }
+        upload.replace(region: MTLRegionMake2D(0, 0, w, h),
+                       mipmapLevel: 0, withBytes: &pixels, bytesPerRow: bpr)
+
+        guard let ul = commandQueue.makeCommandBuffer(),
+              let ulBlit = ul.makeBlitCommandEncoder()
+        else { return }
+        ulBlit.copy(from: upload, to: tex)
+        ulBlit.endEncoding()
+        ul.commit(); ul.waitUntilCompleted()
+
+        isDirty = true
+        onStrokeCommitted?()
+    }
+
+    // MARK: - Color loupe helpers
+
+    private func showColorLoupe(color: UIColor, at point: CGPoint) {
+        if colorLoupeView == nil {
+            let loupe = ColorLoupeView(frame: .zero)
+            addSubview(loupe)
+            colorLoupeView = loupe
+        }
+        colorLoupeView?.alpha = 1
+        colorLoupeView?.setColor(color)
+        colorLoupeView?.moveTo(point)
+    }
+
+    private func updateColorLoupe(color: UIColor, at point: CGPoint) {
+        colorLoupeView?.setColor(color)
+        colorLoupeView?.moveTo(point)
+    }
+
+    private func hideColorLoupe() {
+        UIView.animate(withDuration: 0.25) { self.colorLoupeView?.alpha = 0 }
+    }
+}
+
+private extension CGFloat {
+    func clamped(to r: ClosedRange<CGFloat>) -> CGFloat { Swift.min(Swift.max(self, r.lowerBound), r.upperBound) }
+}
