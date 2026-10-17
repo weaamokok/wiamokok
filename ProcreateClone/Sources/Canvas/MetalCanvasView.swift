@@ -60,6 +60,12 @@ final class MetalCanvasView: MTKView {
     private var hasFiredSized = false
     /// Fired after each stroke is committed to a layer texture.
     var onStrokeCommitted: (() -> Void)?
+    /// Fired when the eyedropper samples a new color; passes the sampled UIColor.
+    var onColorSampled: ((UIColor) -> Void)?
+
+    // MARK: - Eyedropper loupe
+
+    private var colorLoupeView: ColorLoupeView?
 
     // MARK: - Init
 
@@ -606,42 +612,71 @@ final class MetalCanvasView: MTKView {
     // MARK: - Touch forwarding
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if brushEngine.activeTool == .lasso {
-            guard let t = touches.first else { return }
+        guard let t = touches.first else { return }
+        switch brushEngine.activeTool {
+        case .lasso:
             lassoPoints = [canvasPoint(from: t.preciseLocation(in: self))]
             lassoShapeLayer.isHidden = false
             updateLassoCAPath()
-        } else {
+        case .eyedropper:
+            let pt = t.preciseLocation(in: self)
+            if let color = sampleCompositeColor(at: pt) {
+                onColorSampled?(color)
+                showColorLoupe(color: color, at: pt)
+            }
+        case .fill:
+            break
+        default:
             inputHandler.touchesBegan(touches, with: event, in: self)
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if brushEngine.activeTool == .lasso {
-            guard let t = touches.first else { return }
+        guard let t = touches.first else { return }
+        switch brushEngine.activeTool {
+        case .lasso:
             let all = event?.coalescedTouches(for: t) ?? [t]
             all.forEach { lassoPoints.append(canvasPoint(from: $0.preciseLocation(in: self))) }
             updateLassoCAPath()
-        } else {
+        case .eyedropper:
+            let pt = t.preciseLocation(in: self)
+            if let color = sampleCompositeColor(at: pt) {
+                onColorSampled?(color)
+                updateColorLoupe(color: color, at: pt)
+            }
+        case .fill:
+            break
+        default:
             inputHandler.touchesMoved(touches, with: event, in: self)
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if brushEngine.activeTool == .lasso {
+        guard let t = touches.first else { return }
+        switch brushEngine.activeTool {
+        case .lasso:
             lassoShapeLayer.isHidden = true
             if lassoPoints.count > 4 { beginSelection() }
             lassoPoints = []
-        } else {
+        case .eyedropper:
+            hideColorLoupe()
+        case .fill:
+            fillActiveLayer(at: t.preciseLocation(in: self), color: brushEngine.brushColor)
+        default:
             inputHandler.touchesEnded(touches, with: event, in: self)
         }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if brushEngine.activeTool == .lasso {
+        switch brushEngine.activeTool {
+        case .lasso:
             lassoShapeLayer.isHidden = true
             lassoPoints = []
-        } else {
+        case .eyedropper:
+            hideColorLoupe()
+        case .fill:
+            break
+        default:
             inputHandler.touchesEnded(touches, with: event, in: self)
         }
     }
@@ -819,6 +854,165 @@ final class MetalCanvasView: MTKView {
             let ndcY = 1 - Float(world.y * scale / viewSize.height) * 2
             return [ndcX, ndcY, Float(uv.x), Float(uv.y)]
         }
+    }
+
+    // MARK: - Eyedropper
+
+    /// Samples the composite texture at `viewPoint` and returns the color.
+    func sampleCompositeColor(at viewPoint: CGPoint) -> UIColor? {
+        guard let composite = compositeTexture else { return nil }
+        let cp = canvasPoint(from: viewPoint)
+        let px = Int(cp.x * contentScaleFactor)
+        let py = Int(cp.y * contentScaleFactor)
+        guard px >= 0, px < composite.width, py >= 0, py < composite.height else { return nil }
+
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: 1, height: 1, mipmapped: false)
+        desc.storageMode = .shared
+        desc.usage = [.shaderRead]
+        guard let shared = device!.makeTexture(descriptor: desc),
+              let cmd  = commandQueue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder()
+        else { return nil }
+
+        blit.copy(from: composite, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: px, y: py, z: 0),
+                  sourceSize:   MTLSize(width: 1, height: 1, depth: 1),
+                  to: shared, destinationSlice: 0, destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        var bgra = [UInt8](repeating: 0, count: 4)
+        shared.getBytes(&bgra, bytesPerRow: 4, from: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0)
+        // BGRA layout: index 0=B, 1=G, 2=R, 3=A
+        return UIColor(
+            red:   CGFloat(bgra[2]) / 255,
+            green: CGFloat(bgra[1]) / 255,
+            blue:  CGFloat(bgra[0]) / 255,
+            alpha: CGFloat(bgra[3]) / 255
+        )
+    }
+
+    // MARK: - Fill
+
+    /// Flood-fills the active layer from `viewPoint` with `color`.
+    /// Uses tolerance-based BFS comparing each channel; connected pixels within
+    /// `tolerance` (per channel, 0–255) of the seed pixel are filled.
+    func fillActiveLayer(at viewPoint: CGPoint, color: UIColor, tolerance: Int = 30) {
+        guard let layer = layerStack.activeLayer else { return }
+        let tex = layer.texture
+        let w = tex.width, h = tex.height
+        let cp = canvasPoint(from: viewPoint)
+        let px = Int(cp.x * contentScaleFactor)
+        let py = Int(cp.y * contentScaleFactor)
+        guard px >= 0, px < w, py >= 0, py < h else { return }
+
+        // Download private texture via a shared copy
+        let sharedDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        sharedDesc.storageMode = .shared
+        sharedDesc.usage = [.shaderRead]
+        guard let shared = device!.makeTexture(descriptor: sharedDesc),
+              let dl = commandQueue.makeCommandBuffer(),
+              let dlBlit = dl.makeBlitCommandEncoder()
+        else { return }
+        dlBlit.copy(from: tex, to: shared)
+        dlBlit.endEncoding()
+        dl.commit(); dl.waitUntilCompleted()
+
+        let bpr = w * 4
+        var pixels = [UInt8](repeating: 0, count: h * bpr)
+        shared.getBytes(&pixels, bytesPerRow: bpr,
+                        from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+
+        // Extract fill color in BGRA order
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let fillB = UInt8(b * 255), fillG = UInt8(g * 255)
+        let fillR = UInt8(r * 255), fillA = UInt8(a * 255)
+
+        let startIdx = py * bpr + px * 4
+        let tgtB = pixels[startIdx], tgtG = pixels[startIdx+1]
+        let tgtR = pixels[startIdx+2], tgtA = pixels[startIdx+3]
+
+        // Nothing to do if seed already matches fill color
+        if tgtB == fillB && tgtG == fillG && tgtR == fillR && tgtA == fillA { return }
+
+        history.record(layerIndex: layerStack.activeIndex, currentTexture: tex)
+
+        // BFS with efficient array-based queue (head pointer avoids O(n) removeFirst)
+        var visited = [Bool](repeating: false, count: w * h)
+        var queue   = [(x: Int, y: Int)]()
+        queue.reserveCapacity(min(w * h / 4, 262144))
+        queue.append((px, py))
+        var head = 0
+
+        while head < queue.count {
+            let (cx, cy) = queue[head]; head += 1
+            let vi = cy * w + cx
+            guard !visited[vi] else { continue }
+            visited[vi] = true
+
+            let idx = cy * bpr + cx * 4
+            let db = abs(Int(pixels[idx])   - Int(tgtB))
+            let dg = abs(Int(pixels[idx+1]) - Int(tgtG))
+            let dr = abs(Int(pixels[idx+2]) - Int(tgtR))
+            let da = abs(Int(pixels[idx+3]) - Int(tgtA))
+            guard db + dg + dr + da <= tolerance * 4 else { continue }
+
+            pixels[idx]   = fillB
+            pixels[idx+1] = fillG
+            pixels[idx+2] = fillR
+            pixels[idx+3] = fillA
+
+            if cx > 0   { queue.append((cx-1, cy)) }
+            if cx < w-1 { queue.append((cx+1, cy)) }
+            if cy > 0   { queue.append((cx, cy-1)) }
+            if cy < h-1 { queue.append((cx, cy+1)) }
+        }
+
+        // Upload back: write into shared texture then copy to private
+        let uploadDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        uploadDesc.storageMode = .shared
+        uploadDesc.usage = [.shaderRead]
+        guard let upload = device!.makeTexture(descriptor: uploadDesc) else { return }
+        upload.replace(region: MTLRegionMake2D(0, 0, w, h),
+                       mipmapLevel: 0, withBytes: &pixels, bytesPerRow: bpr)
+
+        guard let ul = commandQueue.makeCommandBuffer(),
+              let ulBlit = ul.makeBlitCommandEncoder()
+        else { return }
+        ulBlit.copy(from: upload, to: tex)
+        ulBlit.endEncoding()
+        ul.commit(); ul.waitUntilCompleted()
+
+        isDirty = true
+        onStrokeCommitted?()
+    }
+
+    // MARK: - Color loupe helpers
+
+    private func showColorLoupe(color: UIColor, at point: CGPoint) {
+        if colorLoupeView == nil {
+            let loupe = ColorLoupeView(frame: .zero)
+            addSubview(loupe)
+            colorLoupeView = loupe
+        }
+        colorLoupeView?.alpha = 1
+        colorLoupeView?.setColor(color)
+        colorLoupeView?.moveTo(point)
+    }
+
+    private func updateColorLoupe(color: UIColor, at point: CGPoint) {
+        colorLoupeView?.setColor(color)
+        colorLoupeView?.moveTo(point)
+    }
+
+    private func hideColorLoupe() {
+        UIView.animate(withDuration: 0.25) { self.colorLoupeView?.alpha = 0 }
     }
 }
 

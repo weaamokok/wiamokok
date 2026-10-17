@@ -62,6 +62,10 @@ final class CanvasViewController: UIViewController {
         metalCanvas.onZoomChanged = { [weak self] zoom in
             self?.canvasZoom = zoom
         }
+        metalCanvas.onColorSampled = { [weak self] color in
+            self?.brushColor = Color(color)
+            self?.refreshToolbar()
+        }
 
         // Observe selection state to show/hide overlay
         metalCanvas.selectionState.$isActive

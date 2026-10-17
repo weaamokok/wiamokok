@@ -19,6 +19,7 @@
 		69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 356455AACA98408A2F03E648 /* CanvasToolbarView.swift */; };
 		7A88A3AB95F80D83A54602A5 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 0AC75208284F61A8533B6C25 /* Shaders.metal */; };
 		7FFF9B3DF2051A39E42698D0 /* SelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823525530F4A52D4407CC390 /* SelectionState.swift */; };
+		823FBEB790136728B6F2D462 /* ColorLoupeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2C2F74D027214651269544 /* ColorLoupeView.swift */; };
 		987F4C9904A21F74F182644D /* TouchInputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */; };
 		A0CF735EA7F022A485333D46 /* LayerBlendMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */; };
 		A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089F89526060D113CF2CFA4 /* BrushStamp.swift */; };
@@ -58,6 +59,7 @@
 		DEAC480DE221513C72B05795 /* ProcreateClone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ProcreateClone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED1D51B771300DEFAC7C95B6 /* DocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentStore.swift; sourceTree = "<group>"; };
 		F9D2F0344B587A02A9A93903 /* ColorWheelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorWheelView.swift; sourceTree = "<group>"; };
+		FA2C2F74D027214651269544 /* ColorLoupeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorLoupeView.swift; sourceTree = "<group>"; };
 		FA9974D41F7947B361F01EDD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FE99A5A4618F9E3D6F947CD8 /* ToolPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPickerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -69,6 +71,7 @@
 				CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */,
 				356455AACA98408A2F03E648 /* CanvasToolbarView.swift */,
 				C8B45EFC142E1BE35A6E833A /* CanvasViewController.swift */,
+				FA2C2F74D027214651269544 /* ColorLoupeView.swift */,
 				C3937F57D155337674044C48 /* DrawingTool.swift */,
 				4DB9942C1E1F6C0E1ACDDF41 /* HistoryManager.swift */,
 				DAE7FF813090D797E850EFE7 /* MetalCanvasView.swift */,
@@ -281,6 +284,7 @@
 				32BC90C4C733CA75ABCD2A68 /* CanvasLayer.swift in Sources */,
 				69A4E67888CAA21529F2D284 /* CanvasToolbarView.swift in Sources */,
 				28B6B001736E1D2609616A91 /* CanvasViewController.swift in Sources */,
+				823FBEB790136728B6F2D462 /* ColorLoupeView.swift in Sources */,
 				F9765F523820E5D6E436853E /* ColorWheelView.swift in Sources */,
 				D047F81C6CCB051C66D31F3D /* DocumentStore.swift in Sources */,
 				6872E3C09E3893B37B705062 /* DrawingDocument.swift in Sources */,
