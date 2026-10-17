@@ -20,6 +20,7 @@
 		7A88A3AB95F80D83A54602A5 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 0AC75208284F61A8533B6C25 /* Shaders.metal */; };
 		7FFF9B3DF2051A39E42698D0 /* SelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823525530F4A52D4407CC390 /* SelectionState.swift */; };
 		987F4C9904A21F74F182644D /* TouchInputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4A949CC7DAD44D88166E29 /* TouchInputHandler.swift */; };
+		A0CF735EA7F022A485333D46 /* LayerBlendMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */; };
 		A656D72609C4BFA8C6EBDC44 /* BrushStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C089F89526060D113CF2CFA4 /* BrushStamp.swift */; };
 		B9ED09964817583BFB309F34 /* LayerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4718B3A4E55B85142C5EB489 /* LayerPanelView.swift */; };
 		C083BF4AB73DE03A75B35776 /* CanvasContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDFC5B877F665EED42E90486 /* CanvasContainerView.swift */; };
@@ -33,6 +34,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerBlendMode.swift; sourceTree = "<group>"; };
 		0AC75208284F61A8533B6C25 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
 		0D5ECA9330C21C40BE350183 /* BrushPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushPreset.swift; sourceTree = "<group>"; };
 		2055104D94B28EE6B33EDDDA /* BrushStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrushStudioView.swift; sourceTree = "<group>"; };
@@ -99,6 +101,7 @@
 			isa = PBXGroup;
 			children = (
 				B6ABC98B088972DE4892616D /* CanvasLayer.swift */,
+				06CF355AC71A82EE6C8257F4 /* LayerBlendMode.swift */,
 				2A63D1EDFEABABF733B146BD /* LayerStack.swift */,
 			);
 			path = Layers;
@@ -284,6 +287,7 @@
 				52AAD81036C1FB06AC760CC0 /* DrawingTool.swift in Sources */,
 				156FCD805DD574FCE9853490 /* GalleryView.swift in Sources */,
 				DB3BA1DD7ACCF740E619F750 /* HistoryManager.swift in Sources */,
+				A0CF735EA7F022A485333D46 /* LayerBlendMode.swift in Sources */,
 				B9ED09964817583BFB309F34 /* LayerPanelView.swift in Sources */,
 				E630A494FCD948549AF08054 /* LayerStack.swift in Sources */,
 				43F6DE913249F73DF4012C64 /* MetalCanvasView.swift in Sources */,

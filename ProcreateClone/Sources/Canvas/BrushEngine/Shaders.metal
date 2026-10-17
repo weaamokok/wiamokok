@@ -157,6 +157,61 @@ fragment float4 selectionClearFragmentShader(
     return fill;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline 7 — Layer blend mode composite
+// texture(0) = background (current composite), texture(1) = layer
+// buffer(1) = float opacity, buffer(2) = uint mode (LayerBlendMode raw value)
+// ─────────────────────────────────────────────────────────────────────────────
+
+static float3 applyBlendMode(float3 base, float3 blend, uint mode) {
+    switch (mode) {
+        case 1: // Multiply
+            return base * blend;
+        case 2: // Screen
+            return 1.0 - (1.0 - base) * (1.0 - blend);
+        case 3: // Overlay
+            return float3(
+                base.r < 0.5 ? 2*base.r*blend.r : 1-2*(1-base.r)*(1-blend.r),
+                base.g < 0.5 ? 2*base.g*blend.g : 1-2*(1-base.g)*(1-blend.g),
+                base.b < 0.5 ? 2*base.b*blend.b : 1-2*(1-base.b)*(1-blend.b)
+            );
+        case 4: { // Soft Light (Pegtop formula)
+            float3 d = select(sqrt(base), ((16*base - 12)*base + 4)*base, base < 0.25);
+            return base + (2*blend - 1) * (d - base);
+        }
+        case 5: // Color Dodge
+            return min(base / max(1.0 - blend, 1e-5), 1.0);
+        case 6: // Color Burn
+            return 1.0 - min((1.0 - base) / max(blend, 1e-5), 1.0);
+        case 7: // Difference
+            return abs(base - blend);
+        default: // Normal (0) and fallback
+            return blend;
+    }
+}
+
+fragment float4 blendFragmentShader(
+    BlitVOut              in         [[stage_in]],
+    texture2d<float>      background [[texture(0)]],
+    texture2d<float>      layer      [[texture(1)]],
+    constant float&       opacity    [[buffer(1)]],
+    constant uint&        mode       [[buffer(2)]]
+) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    float4 bg  = background.sample(s, in.uv);
+    float4 lay = layer.sample(s, in.uv);
+
+    float layAlpha = lay.a * opacity;
+    if (layAlpha < 0.001) return bg;
+
+    // Un-premultiply layer to get straight RGB for blend mode math
+    float3 layRGB = lay.a > 0.001 ? lay.rgb / lay.a : float3(0);
+    float3 blended = applyBlendMode(bg.rgb, layRGB, mode);
+    float3 result  = mix(bg.rgb, blended, layAlpha);
+    float  outA    = bg.a + layAlpha * (1.0 - bg.a);
+    return float4(result, outA);
+}
+
 fragment float4 stampFragmentShader(
     StampVOut               in [[stage_in]],
     constant BrushUniforms& u  [[buffer(0)]]

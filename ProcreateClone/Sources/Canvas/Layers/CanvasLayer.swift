@@ -6,7 +6,8 @@ final class CanvasLayer {
     var name: String
     var texture: MTLTexture
     var isVisible: Bool = true
-    var opacity: Float = 1.0   // 0–1, applied during compositing
+    var opacity: Float = 1.0            // 0–1, applied during compositing
+    var blendMode: LayerBlendMode = .normal
 
     init(id: UUID = UUID(), name: String, texture: MTLTexture) {
         self.id   = id

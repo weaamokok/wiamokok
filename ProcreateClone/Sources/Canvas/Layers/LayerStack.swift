@@ -66,6 +66,11 @@ final class LayerStack: ObservableObject {
         layers[index].opacity = opacity
     }
 
+    func setBlendMode(_ mode: LayerBlendMode, at index: Int) {
+        guard layers.indices.contains(index) else { return }
+        layers[index].blendMode = mode
+    }
+
     func setActive(_ index: Int) {
         guard layers.indices.contains(index) else { return }
         activeIndex = index

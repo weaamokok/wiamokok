@@ -19,6 +19,9 @@ final class MetalCanvasView: MTKView {
     private var smudgePipeline:     MTLRenderPipelineState!
     private var selExtractPipeline: MTLRenderPipelineState!  // lasso extract
     private var selClearPipeline:   MTLRenderPipelineState!  // lasso clear
+    private var blendModePipeline:  MTLRenderPipelineState!  // custom blend modes
+    // Scratch texture reused for blend-mode background snapshots
+    private var blendScratchTexture: MTLTexture?
 
     private var compositeTexture: MTLTexture?
     private var smudgePickupTexture: MTLTexture?
@@ -180,6 +183,14 @@ final class MetalCanvasView: MTKView {
         selClrDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
         selClrDesc.colorAttachments[0].isBlendingEnabled = false
         selClearPipeline = try! gpu.makeRenderPipelineState(descriptor: selClrDesc)
+
+        // Blend mode pipeline — reads background + layer, outputs blended result (no fixed-function blend)
+        let blendDesc = MTLRenderPipelineDescriptor()
+        blendDesc.vertexFunction   = lib.makeFunction(name: "blitVertexShader")
+        blendDesc.fragmentFunction = lib.makeFunction(name: "blendFragmentShader")
+        blendDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        blendDesc.colorAttachments[0].isBlendingEnabled = false
+        blendModePipeline = try! gpu.makeRenderPipelineState(descriptor: blendDesc)
     }
 
     // MARK: - Layout / texture init
@@ -191,7 +202,8 @@ final class MetalCanvasView: MTKView {
         let h = Int(bounds.height * contentScaleFactor)
         guard compositeTexture == nil || compositeTexture!.width != w else { return }
 
-        compositeTexture = makePrivateTexture(width: w, height: h)
+        compositeTexture    = makePrivateTexture(width: w, height: h)
+        blendScratchTexture = makePrivateTexture(width: w, height: h)
         Task { @MainActor in
             layerStack.setCanvasSize(width: w, height: h)
             if !self.hasFiredSized {
@@ -236,42 +248,85 @@ final class MetalCanvasView: MTKView {
         compPass.colorAttachments[0].storeAction = .store
         compPass.colorAttachments[0].clearColor  = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
 
-        if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: compPass) {
-            var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
+        // Helper to draw in-progress stamps into an open encoder
+        func encodeStamps(_ enc: MTLRenderCommandEncoder, activeIndex: Int, layerIndex: Int) {
+            guard layerIndex == activeIndex, !stamps.isEmpty else { return }
+            let pipeline: MTLRenderPipelineState
+            switch activeTool {
+            case .eraser: pipeline = erasePipeline
+            case .smudge: pipeline = smudgePipeline
+            default:      pipeline = stampPipeline
+            }
+            enc.setRenderPipelineState(pipeline)
+            if activeTool == .smudge, let pickup = smudgePickupTexture {
+                enc.setFragmentTexture(pickup, index: 0)
+            }
+            for stamp in stamps {
+                var u = stamp.uniforms(drawableSize: dSize, scale: scale)
+                enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                enc.setFragmentBytes(&u, length: MemoryLayout<BrushUniforms>.stride, index: 0)
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            }
+        }
 
-            for (i, layer) in layers.enumerated() {
-                guard layer.isVisible else { continue }
+        // Normal-mode layers accumulate in one open encoder; non-Normal flush it first.
+        var openEncoder: MTLRenderCommandEncoder? = cmdBuf.makeRenderCommandEncoder(descriptor: compPass)
+        var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
 
-                // Blit this layer's texture
+        for (i, layer) in layers.enumerated() {
+            guard layer.isVisible else { continue }
+
+            if layer.blendMode == .normal {
+                // Fast path: use Metal's fixed-function src-alpha blend
+                let enc = openEncoder ?? {
+                    let p = MTLRenderPassDescriptor()
+                    p.colorAttachments[0].texture     = composite
+                    p.colorAttachments[0].loadAction  = .load
+                    p.colorAttachments[0].storeAction = .store
+                    let e = cmdBuf.makeRenderCommandEncoder(descriptor: p)!
+                    openEncoder = e
+                    return e
+                }()
                 enc.setRenderPipelineState(blitPipeline)
                 enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
                 enc.setFragmentTexture(layer.texture, index: 0)
                 var opacity = layer.opacity
                 enc.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 1)
                 enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                encodeStamps(enc, activeIndex: activeI, layerIndex: i)
+            } else {
+                // Custom blend: flush open encoder, copy composite → scratch, run blend pass
+                openEncoder?.endEncoding()
+                openEncoder = nil
 
-                // If active layer, draw in-progress stamps on top
-                if i == activeI, !stamps.isEmpty {
-                    let pipeline: MTLRenderPipelineState
-                    switch activeTool {
-                    case .eraser: pipeline = erasePipeline
-                    case .smudge: pipeline = smudgePipeline
-                    default:      pipeline = stampPipeline
-                    }
-                    enc.setRenderPipelineState(pipeline)
-                    if activeTool == .smudge, let pickup = smudgePickupTexture {
-                        enc.setFragmentTexture(pickup, index: 0)
-                    }
-                    for stamp in stamps {
-                        var u = stamp.uniforms(drawableSize: dSize, scale: scale)
-                        enc.setVertexBytes(&u,   length: MemoryLayout<BrushUniforms>.stride, index: 0)
-                        enc.setFragmentBytes(&u, length: MemoryLayout<BrushUniforms>.stride, index: 0)
-                        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-                    }
+                // Copy composite into scratch so the blend shader can read it
+                if let scratch = blendScratchTexture,
+                   let blitCmd = cmdBuf.makeBlitCommandEncoder() {
+                    blitCmd.copy(from: composite, to: scratch)
+                    blitCmd.endEncoding()
+                }
+
+                let blendPass = MTLRenderPassDescriptor()
+                blendPass.colorAttachments[0].texture     = composite
+                blendPass.colorAttachments[0].loadAction  = .load
+                blendPass.colorAttachments[0].storeAction = .store
+                if let enc = cmdBuf.makeRenderCommandEncoder(descriptor: blendPass),
+                   let scratch = blendScratchTexture {
+                    enc.setRenderPipelineState(blendModePipeline)
+                    enc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+                    enc.setFragmentTexture(scratch,       index: 0)
+                    enc.setFragmentTexture(layer.texture, index: 1)
+                    var opacity = layer.opacity
+                    enc.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 1)
+                    var mode = layer.blendMode.rawValue
+                    enc.setFragmentBytes(&mode, length: MemoryLayout<UInt32>.stride, index: 2)
+                    enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+                    encodeStamps(enc, activeIndex: activeI, layerIndex: i)
+                    enc.endEncoding()
                 }
             }
-            enc.endEncoding()
         }
+        openEncoder?.endEncoding()
 
         // ── Pass 2b: Blit floating selection content onto composite ─────────
         if selectionState.isActive, let content = selectionState.contentTexture {
@@ -301,8 +356,8 @@ final class MetalCanvasView: MTKView {
         }
 
         finalEnc.setRenderPipelineState(blitPipeline)
-        var quad = canvasDisplayQuad()
-        finalEnc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
+        var displayQuad = canvasDisplayQuad()
+        finalEnc.setVertexBytes(&displayQuad, length: displayQuad.count * MemoryLayout<Float>.stride, index: 0)
         finalEnc.setFragmentTexture(composite, index: 0)
         var fullOpacity: Float = 1.0
         finalEnc.setFragmentBytes(&fullOpacity, length: MemoryLayout<Float>.stride, index: 1)
