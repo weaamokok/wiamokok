@@ -36,6 +36,13 @@ final class MetalCanvasView: MTKView {
     private var lassoPoints: [CGPoint] = []
     private let lassoShapeLayer = CAShapeLayer()
 
+    // MARK: - Dirty tracking
+
+    /// Set to true whenever something visible changes; cleared after each drawn frame.
+    private var isDirty = true
+    /// Predicted stamps rendered speculatively — discarded at the next real update.
+    private var predictedStamps: [BrushStamp] = []
+
     /// Fired once after the canvas first gets a valid size (width, height in pixels).
     var onCanvasSized: ((Int, Int) -> Void)?
     private var hasFiredSized = false
@@ -74,8 +81,21 @@ final class MetalCanvasView: MTKView {
 
         inputHandler = TouchInputHandler()
         inputHandler.onStrokeBegin  = { [weak self] in self?.handleStrokeBegin() }
-        inputHandler.onStrokeUpdate = { [weak self] pts in self?.brushEngine.addPoints(pts) }
-        inputHandler.onStrokeEnd    = { [weak self] in self?.commitCurrentStroke() }
+        inputHandler.onStrokeUpdate = { [weak self] pts in
+            self?.predictedStamps = []          // discard previous prediction
+            self?.brushEngine.addPoints(pts)
+            self?.isDirty = true
+        }
+        inputHandler.onStrokePredicted = { [weak self] pts in
+            guard let self else { return }
+            // Speculatively generate stamps for predicted points but keep them separate
+            self.predictedStamps = self.brushEngine.previewStamps(for: pts)
+            self.isDirty = true
+        }
+        inputHandler.onStrokeEnd    = { [weak self] in
+            self?.predictedStamps = []
+            self?.commitCurrentStroke()
+        }
 
         setupLassoLayer()
     }
@@ -183,6 +203,8 @@ final class MetalCanvasView: MTKView {
     // MARK: - Render loop
 
     override func draw(_ rect: CGRect) {
+        guard isDirty else { return }
+        isDirty = false
         guard
             let composite = compositeTexture,
             let drawable  = currentDrawable,
@@ -191,7 +213,8 @@ final class MetalCanvasView: MTKView {
 
         let layers   = layerStack.layers
         let activeI  = layerStack.activeIndex
-        let stamps   = brushEngine.currentStrokeStamps
+        // Combine committed + speculative predicted stamps for this frame
+        let stamps   = brushEngine.currentStrokeStamps + predictedStamps
         let activeTool = brushEngine.activeTool
         let dSize    = CGSize(width: self.drawableSize.width, height: self.drawableSize.height)
         let scale    = Float(contentScaleFactor)
@@ -401,17 +424,20 @@ final class MetalCanvasView: MTKView {
     func undo() {
         brushEngine.clearCurrentStroke()
         history.undo(layers: layerStack.layers)
+        isDirty = true
     }
 
     func redo() {
         brushEngine.clearCurrentStroke()
         history.redo(layers: layerStack.layers)
+        isDirty = true
     }
 
     func clearCanvas() {
         guard let layer = layerStack.activeLayer else { return }
         history.record(layerIndex: layerStack.activeIndex, currentTexture: layer.texture)
         clearLayerTexture(layer.texture, isBackground: layerStack.activeIndex == 0)
+        isDirty = true
         brushEngine.clearCurrentStroke()
     }
 
@@ -625,6 +651,7 @@ final class MetalCanvasView: MTKView {
         }
         cmd.commit(); cmd.waitUntilCompleted()
         selectionState.reset()
+        isDirty = true
     }
 
     func cancelSelection() {
@@ -634,6 +661,7 @@ final class MetalCanvasView: MTKView {
             blit(src: snap, dst: layer.texture)
         }
         selectionState.reset()
+        isDirty = true
     }
 
     private func blit(src: MTLTexture, dst: MTLTexture) {

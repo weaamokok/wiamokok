@@ -22,6 +22,8 @@ struct ToolPickerView: View {
                                   : Color.clear)
                     )
                 }
+                .accessibilityLabel(tool.label)
+                .accessibilityAddTraits(activeTool == tool ? .isSelected : [])
                 .animation(.spring(response: 0.2), value: activeTool)
             }
         }

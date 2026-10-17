@@ -47,6 +47,8 @@ struct CanvasToolbarView: View {
                         .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
                         .shadow(color: .black.opacity(0.3), radius: 4)
                 }
+                .accessibilityLabel("Brush color")
+                .accessibilityHint("Opens color picker")
                 .padding(.leading, 68)
 
                 // Brush studio
@@ -56,6 +58,8 @@ struct CanvasToolbarView: View {
                         .frame(width: 44, height: 44)
                         .foregroundStyle(.primary)
                 }
+                .accessibilityLabel("Brush studio")
+                .accessibilityHint("Opens brush settings for \(activePreset.name)")
 
                 Spacer()
 
@@ -71,21 +75,24 @@ struct CanvasToolbarView: View {
                     .frame(height: 44)
                     .padding(.horizontal, 8)
                 }
+                .accessibilityLabel("Layers")
+                .accessibilityValue("\(layerStack.count) layer\(layerStack.count == 1 ? "" : "s")")
+                .accessibilityHint("Opens layers panel")
 
                 // Undo — dimmed when unavailable
-                toolbarButton(icon: "arrow.uturn.backward", enabled: history.canUndo) { onUndo() }
+                toolbarButton(icon: "arrow.uturn.backward", label: "Undo", enabled: history.canUndo) { onUndo() }
 
                 // Redo
-                toolbarButton(icon: "arrow.uturn.forward", enabled: history.canRedo) { onRedo() }
+                toolbarButton(icon: "arrow.uturn.forward", label: "Redo", enabled: history.canRedo) { onRedo() }
 
                 // Clear
-                toolbarButton(icon: "trash", enabled: true) { onClear() }
+                toolbarButton(icon: "trash", label: "Clear layer", enabled: true) { onClear() }
 
                 // Export / share
-                toolbarButton(icon: "square.and.arrow.up", enabled: true) { onExport() }
+                toolbarButton(icon: "square.and.arrow.up", label: "Export drawing", enabled: true) { onExport() }
 
                 // Close
-                toolbarButton(icon: "xmark.circle.fill", enabled: true) { onClose() }
+                toolbarButton(icon: "xmark.circle.fill", label: "Close canvas", enabled: true) { onClose() }
                     .padding(.trailing, 16)
             }
             .frame(height: 52)
@@ -127,7 +134,7 @@ struct CanvasToolbarView: View {
     }
 
     @ViewBuilder
-    private func toolbarButton(icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func toolbarButton(icon: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 18))
@@ -135,6 +142,7 @@ struct CanvasToolbarView: View {
                 .frame(width: 44, height: 44)
         }
         .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 }
 

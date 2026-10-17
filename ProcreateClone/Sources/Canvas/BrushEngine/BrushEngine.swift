@@ -40,12 +40,33 @@ final class BrushEngine {
         lastPoint = nil
     }
 
+    /// Produce speculative stamps for predicted points without mutating stroke state.
+    func previewStamps(for points: [TouchPoint]) -> [BrushStamp] {
+        guard let anchor = lastPoint ?? points.first else { return [] }
+        var result: [BrushStamp] = []
+        var prev = anchor
+        for point in points {
+            result.append(contentsOf: stamps(from: prev, to: point))
+            prev = point
+        }
+        return result
+    }
+
     // MARK: - Stamp placement
 
     private func placeStamp(at point: TouchPoint) {
+        currentStrokeStamps.append(contentsOf: stamp(at: point))
+    }
+
+    private func interpolateStamps(from a: TouchPoint, to b: TouchPoint) {
+        currentStrokeStamps.append(contentsOf: stamps(from: a, to: b))
+    }
+
+    // MARK: - Pure stamp generation (no mutation)
+
+    private func stamp(at point: TouchPoint) -> [BrushStamp] {
         let (r, g, b) = rgb(from: brushColor)
         let preset = activePreset
-        // Pressure scales size ±40%; jitter adds per-stamp randomness
         let basePressureSize = brushSize * (0.6 + point.pressure * 0.8)
         let jitterScale = preset.sizeJitter > 0
             ? 1.0 + Float.random(in: -preset.sizeJitter...preset.sizeJitter)
@@ -58,26 +79,25 @@ final class BrushEngine {
             : 0
         let stampOpacity = (baseOpacity + opacityShift).clamped(to: 0.03...1.0)
 
-        let stamp = BrushStamp(
+        return [BrushStamp(
             x: point.x, y: point.y,
             size: stampSize, opacity: stampOpacity,
             r: r, g: g, b: b,
             azimuth: point.azimuth, altitude: point.altitude,
             softness: softness
-        )
-        currentStrokeStamps.append(stamp)
+        )]
     }
 
-    private func interpolateStamps(from a: TouchPoint, to b: TouchPoint) {
+    private func stamps(from a: TouchPoint, to b: TouchPoint) -> [BrushStamp] {
         let dx = b.x - a.x
         let dy = b.y - a.y
         let dist = sqrt(dx * dx + dy * dy)
         let avgSize = brushSize * (0.6 + (a.pressure + b.pressure) / 2 * 0.8)
         let step = max(avgSize * spacing, 1)
-        guard dist > 0 else { return }
+        guard dist > 0 else { return [] }
 
         let steps = max(Int(dist / step), 1)
-        for i in 1...steps {
+        return (1...steps).flatMap { i -> [BrushStamp] in
             let t = Float(i) / Float(steps)
             let pt = TouchPoint(
                 x: a.x + dx * t,
@@ -87,7 +107,7 @@ final class BrushEngine {
                 azimuth: a.azimuth + (b.azimuth - a.azimuth) * t,
                 altitude: a.altitude + (b.altitude - a.altitude) * t
             )
-            placeStamp(at: pt)
+            return stamp(at: pt)
         }
     }
 
