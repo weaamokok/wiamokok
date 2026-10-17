@@ -43,6 +43,15 @@ final class MetalCanvasView: MTKView {
     /// Predicted stamps rendered speculatively — discarded at the next real update.
     private var predictedStamps: [BrushStamp] = []
 
+    // MARK: - Canvas viewport (zoom + pan)
+
+    /// Display zoom: 1.0 = canvas fills view exactly, range 0.1 … 32.
+    private(set) var canvasZoom: CGFloat = 1.0
+    /// Canvas origin in view-point space (top-left corner of the canvas rect).
+    private(set) var canvasOffset: CGPoint = .zero
+    /// Fired whenever zoom changes so the toolbar HUD can update.
+    var onZoomChanged: ((CGFloat) -> Void)?
+
     /// Fired once after the canvas first gets a valid size (width, height in pixels).
     var onCanvasSized: ((Int, Int) -> Void)?
     private var hasFiredSized = false
@@ -80,6 +89,7 @@ final class MetalCanvasView: MTKView {
         brushEngine = BrushEngine(device: gpu)
 
         inputHandler = TouchInputHandler()
+        inputHandler.coordinateTransform = { [weak self] pt in self?.canvasPoint(from: pt) ?? pt }
         inputHandler.onStrokeBegin  = { [weak self] in self?.handleStrokeBegin() }
         inputHandler.onStrokeUpdate = { [weak self] pts in
             self?.predictedStamps = []          // discard previous prediction
@@ -282,7 +292,7 @@ final class MetalCanvasView: MTKView {
             }
         }
 
-        // ── Pass 3: Blit compositeTexture to the drawable ────────────────────
+        // ── Pass 3: Blit compositeTexture to the drawable (zoom + pan applied) ─
         guard let passDesc = currentRenderPassDescriptor,
               let finalEnc = cmdBuf.makeRenderCommandEncoder(descriptor: passDesc)
         else {
@@ -291,7 +301,7 @@ final class MetalCanvasView: MTKView {
         }
 
         finalEnc.setRenderPipelineState(blitPipeline)
-        var quad: [Float] = [-1, 1, 0, 0,  1, 1, 1, 0,  -1, -1, 0, 1,  1, -1, 1, 1]
+        var quad = canvasDisplayQuad()
         finalEnc.setVertexBytes(&quad, length: quad.count * MemoryLayout<Float>.stride, index: 0)
         finalEnc.setFragmentTexture(composite, index: 0)
         var fullOpacity: Float = 1.0
@@ -387,6 +397,61 @@ final class MetalCanvasView: MTKView {
     func setSoftness(_ s: Float)                { brushEngine.softness     = s       }
     func setSpacing(_ s: Float)                 { brushEngine.spacing      = s       }
 
+    // MARK: - Canvas viewport API
+
+    func applyZoom(scale: CGFloat, anchor: CGPoint) {
+        let newZoom = (canvasZoom * scale).clamped(to: 0.1...32)
+        let clampedScale = newZoom / canvasZoom
+        canvasOffset = CGPoint(
+            x: anchor.x - (anchor.x - canvasOffset.x) * clampedScale,
+            y: anchor.y - (anchor.y - canvasOffset.y) * clampedScale
+        )
+        canvasZoom = newZoom
+        isDirty = true
+        onZoomChanged?(canvasZoom)
+    }
+
+    func applyPan(delta: CGPoint) {
+        canvasOffset.x += delta.x
+        canvasOffset.y += delta.y
+        isDirty = true
+    }
+
+    func resetZoom() {
+        canvasZoom   = 1.0
+        canvasOffset = .zero
+        isDirty = true
+        onZoomChanged?(canvasZoom)
+    }
+
+    // MARK: - Canvas viewport helpers
+
+    /// Maps a view-space point to canvas-pixel coordinates.
+    func canvasPoint(from viewPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (viewPoint.x - canvasOffset.x) / canvasZoom,
+            y: (viewPoint.y - canvasOffset.y) / canvasZoom
+        )
+    }
+
+    /// Full NDC quad (TL,TR,BL,BR) placing the canvas texture in the drawable at current zoom+pan.
+    private func canvasDisplayQuad() -> [Float] {
+        let vw = Float(bounds.width)
+        let vh = Float(bounds.height)
+        let ox = Float(canvasOffset.x)
+        let oy = Float(canvasOffset.y)
+        let cw = vw * Float(canvasZoom)
+        let ch = vh * Float(canvasZoom)
+        func ndcX(_ x: Float) -> Float { (x / vw) * 2 - 1 }
+        func ndcY(_ y: Float) -> Float { 1 - (y / vh) * 2 }
+        return [
+            ndcX(ox),    ndcY(oy),    0, 0,
+            ndcX(ox+cw), ndcY(oy),    1, 0,
+            ndcX(ox),    ndcY(oy+ch), 0, 1,
+            ndcX(ox+cw), ndcY(oy+ch), 1, 1,
+        ]
+    }
+
     /// Renders a flat composite of all visible layers and returns it as a UIImage.
     func renderCompositeImage() -> UIImage? {
         guard let composite = compositeTexture else { return nil }
@@ -467,10 +532,20 @@ final class MetalCanvasView: MTKView {
 
     private func updateLassoCAPath() {
         guard lassoPoints.count > 1 else { return }
+        // lassoPoints are in canvas space; convert back to view space for the CAShapeLayer overlay
         let p = UIBezierPath()
-        p.move(to: lassoPoints[0])
-        lassoPoints.dropFirst().forEach { p.addLine(to: $0) }
+        let first = viewPoint(from: lassoPoints[0])
+        p.move(to: first)
+        lassoPoints.dropFirst().forEach { p.addLine(to: viewPoint(from: $0)) }
         lassoShapeLayer.path = p.cgPath
+    }
+
+    /// Maps a canvas-space point back to view-space for overlay drawing.
+    private func viewPoint(from canvasPt: CGPoint) -> CGPoint {
+        CGPoint(
+            x: canvasPt.x * canvasZoom + canvasOffset.x,
+            y: canvasPt.y * canvasZoom + canvasOffset.y
+        )
     }
 
     // MARK: - Touch forwarding
@@ -478,7 +553,7 @@ final class MetalCanvasView: MTKView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if brushEngine.activeTool == .lasso {
             guard let t = touches.first else { return }
-            lassoPoints = [t.preciseLocation(in: self)]
+            lassoPoints = [canvasPoint(from: t.preciseLocation(in: self))]
             lassoShapeLayer.isHidden = false
             updateLassoCAPath()
         } else {
@@ -490,7 +565,7 @@ final class MetalCanvasView: MTKView {
         if brushEngine.activeTool == .lasso {
             guard let t = touches.first else { return }
             let all = event?.coalescedTouches(for: t) ?? [t]
-            all.forEach { lassoPoints.append($0.preciseLocation(in: self)) }
+            all.forEach { lassoPoints.append(canvasPoint(from: $0.preciseLocation(in: self))) }
             updateLassoCAPath()
         } else {
             inputHandler.touchesMoved(touches, with: event, in: self)
@@ -690,4 +765,8 @@ final class MetalCanvasView: MTKView {
             return [ndcX, ndcY, Float(uv.x), Float(uv.y)]
         }
     }
+}
+
+private extension CGFloat {
+    func clamped(to r: ClosedRange<CGFloat>) -> CGFloat { Swift.min(Swift.max(self, r.lowerBound), r.upperBound) }
 }

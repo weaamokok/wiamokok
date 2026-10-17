@@ -17,6 +17,8 @@ struct CanvasToolbarView: View {
     var onRedo: () -> Void
     var onClear: () -> Void
     var onExport: () -> Void
+    var onResetZoom: (() -> Void)?
+    var canvasZoom: CGFloat = 1.0
 
     @State private var showColorPicker = false
     @State private var showLayers = false
@@ -60,6 +62,20 @@ struct CanvasToolbarView: View {
                 }
                 .accessibilityLabel("Brush studio")
                 .accessibilityHint("Opens brush settings for \(activePreset.name)")
+
+                // Zoom indicator — tap to reset to 100 %
+                if abs(canvasZoom - 1.0) > 0.01 {
+                    Button { onResetZoom?() } label: {
+                        Text("\(Int(canvasZoom * 100))%")
+                            .font(.caption.monospacedDigit().bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                    .accessibilityLabel("Zoom \(Int(canvasZoom * 100)) percent")
+                    .accessibilityHint("Tap to reset to 100 percent")
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
 
                 Spacer()
 

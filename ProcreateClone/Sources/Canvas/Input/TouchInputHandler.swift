@@ -18,6 +18,9 @@ final class TouchInputHandler {
     /// speculatively and discard on the next real update.
     var onStrokePredicted: (([TouchPoint]) -> Void)?
     var onStrokeEnd: (() -> Void)?
+    /// Applied to every view-space location before it becomes a TouchPoint.
+    /// Use this to convert view → canvas coordinates when the canvas is zoomed/panned.
+    var coordinateTransform: ((CGPoint) -> CGPoint)?
 
     /// Process began touches — start a new stroke.
     func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?, in view: UIView) {
@@ -53,7 +56,8 @@ final class TouchInputHandler {
     }
 
     private func makeTouchPoint(_ t: UITouch, primary: UITouch, view: UIView) -> TouchPoint {
-        let loc = t.preciseLocation(in: view)
+        let raw = t.preciseLocation(in: view)
+        let loc = coordinateTransform?(raw) ?? raw
         let pressure = t.type == .pencil
             ? Float(t.force / max(t.maximumPossibleForce, 0.001))
             : Float(0.5)

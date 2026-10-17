@@ -22,6 +22,7 @@ final class CanvasViewController: UIViewController {
 
     private var autosaveTimer: Timer?
     private var overlayHost: UIHostingController<SelectionOverlayView>?
+    private var canvasZoom: CGFloat = 1.0 { didSet { refreshToolbar() } }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -58,6 +59,9 @@ final class CanvasViewController: UIViewController {
         metalCanvas.onStrokeCommitted = { [weak self] in
             self?.scheduleAutosave()
         }
+        metalCanvas.onZoomChanged = { [weak self] zoom in
+            self?.canvasZoom = zoom
+        }
 
         // Observe selection state to show/hide overlay
         metalCanvas.selectionState.$isActive
@@ -70,24 +74,7 @@ final class CanvasViewController: UIViewController {
     }
 
     private func setupToolbar() {
-        let toolbar = CanvasToolbarView(
-            brushColor:   Binding(get: { self.brushColor },   set: { self.brushColor   = $0 }),
-            brushSize:    Binding(get: { self.brushSize },    set: { self.brushSize    = $0 }),
-            brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
-            activeTool:   Binding(get: { self.activeTool },   set: { self.activeTool   = $0 }),
-            activePreset: Binding(get: { self.activePreset }, set: { self.activePreset = $0 }),
-            softness:     Binding(get: { self.softness },     set: { self.softness     = $0 }),
-            spacing:      Binding(get: { self.spacing },      set: { self.spacing      = $0 }),
-            layerStack:   metalCanvas.layerStack,
-            history:      metalCanvas.history,
-            onClose:  { [weak self] in self?.onDismiss?() },
-            onUndo:   { [weak self] in self?.metalCanvas.undo() },
-            onRedo:   { [weak self] in self?.metalCanvas.redo() },
-            onClear:  { [weak self] in self?.metalCanvas.clearCanvas() },
-            onExport: { [weak self] in self?.exportPNG() }
-        )
-
-        toolbarHost = UIHostingController(rootView: toolbar)
+        toolbarHost = UIHostingController(rootView: makeToolbarView())
         toolbarHost.view.backgroundColor = .clear
         toolbarHost.view.translatesAutoresizingMaskIntoConstraints = false
         toolbarHost.view.isUserInteractionEnabled = true
@@ -104,7 +91,33 @@ final class CanvasViewController: UIViewController {
         ])
     }
 
+    private func makeToolbarView() -> CanvasToolbarView {
+        CanvasToolbarView(
+            brushColor:   Binding(get: { self.brushColor },   set: { self.brushColor   = $0 }),
+            brushSize:    Binding(get: { self.brushSize },    set: { self.brushSize    = $0 }),
+            brushOpacity: Binding(get: { self.brushOpacity }, set: { self.brushOpacity = $0 }),
+            activeTool:   Binding(get: { self.activeTool },   set: { self.activeTool   = $0 }),
+            activePreset: Binding(get: { self.activePreset }, set: { self.activePreset = $0 }),
+            softness:     Binding(get: { self.softness },     set: { self.softness     = $0 }),
+            spacing:      Binding(get: { self.spacing },      set: { self.spacing      = $0 }),
+            layerStack:   metalCanvas.layerStack,
+            history:      metalCanvas.history,
+            onClose:      { [weak self] in self?.onDismiss?() },
+            onUndo:       { [weak self] in self?.metalCanvas.undo() },
+            onRedo:       { [weak self] in self?.metalCanvas.redo() },
+            onClear:      { [weak self] in self?.metalCanvas.clearCanvas() },
+            onExport:     { [weak self] in self?.exportPNG() },
+            onResetZoom:  { [weak self] in self?.metalCanvas.resetZoom() },
+            canvasZoom:   canvasZoom
+        )
+    }
+
+    private func refreshToolbar() {
+        toolbarHost.rootView = makeToolbarView()
+    }
+
     private func setupGestures() {
+        // ── Undo / Redo taps ────────────────────────────────────────────────
         let twoFinger = UITapGestureRecognizer(target: self, action: #selector(undoGesture))
         twoFinger.numberOfTouchesRequired = 2
         view.addGestureRecognizer(twoFinger)
@@ -115,14 +128,38 @@ final class CanvasViewController: UIViewController {
 
         twoFinger.require(toFail: threeFinger)
 
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(selectionPan(_:)))
-        pan.maximumNumberOfTouches = 1
-        pan.delegate = self
-        metalCanvas.addGestureRecognizer(pan)
+        // ── Canvas zoom reset (double-tap) ──────────────────────────────────
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(resetZoomGesture))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.numberOfTouchesRequired = 2
+        metalCanvas.addGestureRecognizer(doubleTap)
+        twoFinger.require(toFail: doubleTap)
 
-        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(selectionPinch(_:)))
-        pinch.delegate = self
-        metalCanvas.addGestureRecognizer(pinch)
+        // ── Canvas pan (2-finger) ───────────────────────────────────────────
+        let canvasPan = UIPanGestureRecognizer(target: self, action: #selector(canvasPanGesture(_:)))
+        canvasPan.minimumNumberOfTouches = 2
+        canvasPan.maximumNumberOfTouches = 2
+        canvasPan.delegate = self
+        canvasPan.name = "canvasPan"
+        metalCanvas.addGestureRecognizer(canvasPan)
+
+        // ── Canvas pinch ────────────────────────────────────────────────────
+        let canvasPinch = UIPinchGestureRecognizer(target: self, action: #selector(canvasPinchGesture(_:)))
+        canvasPinch.delegate = self
+        canvasPinch.name = "canvasPinch"
+        metalCanvas.addGestureRecognizer(canvasPinch)
+
+        // ── Selection transform (1-finger pan, any-finger pinch while active) ─
+        let selPan = UIPanGestureRecognizer(target: self, action: #selector(selectionPan(_:)))
+        selPan.maximumNumberOfTouches = 1
+        selPan.delegate = self
+        selPan.name = "selPan"
+        metalCanvas.addGestureRecognizer(selPan)
+
+        let selPinch = UIPinchGestureRecognizer(target: self, action: #selector(selectionPinch(_:)))
+        selPinch.delegate = self
+        selPinch.name = "selPinch"
+        metalCanvas.addGestureRecognizer(selPinch)
     }
 
     // MARK: - Selection overlay
@@ -155,6 +192,28 @@ final class CanvasViewController: UIViewController {
         overlayHost?.view.removeFromSuperview()
         overlayHost?.removeFromParent()
         overlayHost = nil
+    }
+
+    // MARK: - Selection transform gestures
+
+    // MARK: - Canvas navigation gestures
+
+    @objc private func resetZoomGesture() {
+        metalCanvas.resetZoom()
+    }
+
+    @objc private func canvasPanGesture(_ g: UIPanGestureRecognizer) {
+        guard !metalCanvas.selectionState.isActive else { return }
+        let delta = g.translation(in: metalCanvas)
+        g.setTranslation(.zero, in: metalCanvas)
+        metalCanvas.applyPan(delta: delta)
+    }
+
+    @objc private func canvasPinchGesture(_ g: UIPinchGestureRecognizer) {
+        guard !metalCanvas.selectionState.isActive else { return }
+        let scale = g.scale
+        g.scale = 1
+        metalCanvas.applyZoom(scale: scale, anchor: g.location(in: metalCanvas))
     }
 
     // MARK: - Selection transform gestures
@@ -246,12 +305,19 @@ final class CanvasViewController: UIViewController {
 
 extension CanvasViewController: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer,
-                           shouldReceive touch: UITouch) -> Bool {
-        metalCanvas.selectionState.isActive
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // Allow pan + pinch to run simultaneously for smooth navigation / selection
+        true
     }
 
-    func gestureRecognizer(_ g: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        true
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        let name = g.name ?? ""
+        if name == "selPan" || name == "selPinch" {
+            return metalCanvas.selectionState.isActive
+        }
+        if name == "canvasPan" || name == "canvasPinch" {
+            return !metalCanvas.selectionState.isActive
+        }
+        return true
     }
 }
